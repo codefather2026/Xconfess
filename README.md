@@ -166,6 +166,8 @@ xConfess participates in Stellar Wave. Check the open issues for work tagged `St
 
 When your PR is ready for review, use the [Ready for Review comment template](docs/WAVE_5_READY_FOR_REVIEW_TEMPLATE.md) to signal maintainers.
 
+When reporting bugs, see [Attaching Logs to Issues and PRs](docs/LOG_ATTACHING_GUIDE.md) for redaction guidelines.
+
 ## Package Docs
 - `xconfess-backend/README.md`
 - `xconfess-frontend/README.md`
