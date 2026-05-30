@@ -58,6 +58,8 @@ docker compose -f compose.yaml ps
 
 ### 3. Configure environment files
 
+> **Security reminder:** Never commit `.env` or `.env.local` files. Always commit only the `.env.example` template files (which contain no real secrets). Do not paste real secret values into issues, PR descriptions, or comments.
+
 **Backend** — copy the sample and fill in the values marked `change-me`:
 
 ```bash
@@ -99,6 +101,7 @@ This starts the backend and frontend concurrently. Once both are ready:
 |---------|-----|
 | Frontend | http://localhost:3000 |
 | Backend API | http://localhost:5000 |
+| Backend health | http://localhost:5000/health |
 | Postgres | localhost:55432 |
 | Redis | localhost:6379 |
 
