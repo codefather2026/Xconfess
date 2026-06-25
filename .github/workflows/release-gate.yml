@@ -62,6 +62,9 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
+      - name: Use repository npm version
+        run: npm install --global npm@10.9.3
+
       - name: Extract version metadata
         id: meta
         run: |
@@ -110,6 +113,9 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: package-lock.json
+
+      - name: Use repository npm version
+        run: npm install --global npm@10.9.3
 
       - name: Install dependencies
         run: npm ci
@@ -285,6 +291,9 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: package-lock.json
+
+      - name: Use repository npm version
+        run: npm install --global npm@10.9.3
 
       - name: Install dependencies
         run: npm ci
