@@ -31,6 +31,7 @@ import { EncryptionModule } from './encryption/encryption.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { DatabaseModule } from './database/database.module';
 import { FeatureFlagsModule } from './feature-flags/feature-flags.module';
+import { BookmarkModule } from './bookmark/bookmark.module';
 // ✅ Canonical queue stack: @nestjs/bullmq (BullMQ v4 + ioredis)
 // The legacy @nestjs/bull import has been removed. All queues use BullMQ.
 import { BullModule } from '@nestjs/bullmq';
@@ -140,6 +141,7 @@ import { BullModule } from '@nestjs/bullmq';
     CacheModule,
     DatabaseModule,
     FeatureFlagsModule,
+    BookmarkModule,
   ],
   controllers: [AppController],
   providers: [
