@@ -1,3 +1,4 @@
+import { createApiErrorResponse } from "@/lib/apiErrorHandler";
 import { buildProxyErrorResponse, internalProxyErrorResponse } from "@/app/lib/utils/proxyError";
 import { getApiBaseUrl } from "@/app/lib/config";
 
@@ -109,8 +110,13 @@ export async function GET(
         });
       }
 
-      const err = await response.json().catch(() => ({} as { message?: string }));
-      return buildProxyErrorResponse(err.message || "Failed to fetch comments", response.status, { route: "GET /api/comments/by-confession/[confessionId]" });
+      const errBody = await response.json().catch(() => ({}));
+      return createApiErrorResponse(errBody, {
+          status: response.status,
+          fallbackMessage: "Failed to fetch comments",
+          upstreamResponse: response,
+          route: "GET /api/comments/by-confession/[confessionId]"
+        });
     }
 
     const data = await response.json();
@@ -150,13 +156,26 @@ export async function GET(
         : [],
     }));
 
-    // hasMore: if limit was requested and we received >= limit, assume more pages
-    const hasMore = limit ? comments.length >= Number(limit) : false;
+    const hasMore =
+      typeof data.hasMore === "boolean"
+        ? data.hasMore
+        : typeof data.meta?.hasMore === "boolean"
+          ? data.meta.hasMore
+          : limit
+            ? comments.length >= Number(limit)
+            : false;
 
-    return new Response(JSON.stringify({ comments, hasMore }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    });
+    return new Response(
+      JSON.stringify({
+        comments,
+        hasMore,
+        nextCursor: data.nextCursor ?? data.meta?.nextCursor ?? null,
+      }),
+      {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      },
+    );
   } catch (error) {
     const isDemoMode =
       process.env.NODE_ENV === "development" ||

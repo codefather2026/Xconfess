@@ -18,6 +18,7 @@ import {
   ForbiddenException,
   HttpException,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { UserService } from './user.service';
 import { AuthService } from '../auth/auth.service';
 import { User, UserRole } from './entities/user.entity';
@@ -27,9 +28,8 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { GetUser } from '../auth/get-user.decorator';
 import { UpdateUserProfileDto } from './dto/updateProfile.dto';
 import { CryptoUtil } from '../common/crypto.util';
-import { UpdateNotificationPreferencesDto } from './dto/update-notification-preferences.dto';
+import { UpdateNotificationPreferencesDto, NotificationPreferencesResponse } from './dto/update-notification-preferences.dto';
 import {
-  UpdatePrivacySettingsDto,
   PrivacySettingsResponseDto,
 } from './dto/update-privacy-settings.dto';
 import {
@@ -90,6 +90,7 @@ export class UserController {
 
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
+  @Throttle({ default: { limit: 3, ttl: 60_000 } })
   @ApiOperation({ summary: 'Register a new user account' })
   @ApiBody({ type: RegisterDto })
   @ApiResponse({
@@ -158,6 +159,7 @@ export class UserController {
 
   @Post('login')
   @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @ApiOperation({ summary: 'Log in (alternative endpoint for user login)' })
   @ApiBody({ type: LoginDto })
   @ApiResponse({
@@ -210,6 +212,20 @@ export class UserController {
     }
   }
 
+  @Get('profile/summary')
+  @UseGuards(JwtAuthGuard)
+  async getProfileSummary(
+    @GetUser('id') userId: number,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ): Promise<any> {
+    return this.userService.getProfileSummary(
+      userId,
+      parseInt(page || '1', 10),
+      parseInt(limit || '10', 10),
+    );
+  }
+
   @Post('deactivate')
   @UseGuards(JwtAuthGuard)
   async deactivateAccount(
@@ -228,12 +244,40 @@ export class UserController {
     return this.formatUserResponse(updatedUser);
   }
 
+  private readonly DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferencesResponse = {
+    reactions: { inApp: true, email: true, push: true },
+    comments: { inApp: true, email: true, push: true },
+    mentions: { inApp: true, email: true, push: true },
+    tips: { inApp: true, email: true, push: true },
+    reports: { inApp: true, email: true, push: true },
+    system: { inApp: true, email: true, push: true },
+    enableQuietHours: false,
+    quietHoursStart: null,
+    quietHoursEnd: null,
+    timezone: null,
+  };
+
+  private getNotificationPreferencesResponse(prefs: Record<string, any>): NotificationPreferencesResponse {
+    return {
+      reactions: { inApp: true, email: true, push: true, ...prefs.reactions },
+      comments: { inApp: true, email: true, push: true, ...prefs.comments },
+      mentions: { inApp: true, email: true, push: true, ...prefs.mentions },
+      tips: { inApp: true, email: true, push: true, ...prefs.tips },
+      reports: { inApp: true, email: true, push: true, ...prefs.reports },
+      system: { inApp: true, email: true, push: true, ...prefs.system },
+      enableQuietHours: prefs.enableQuietHours ?? false,
+      quietHoursStart: prefs.quietHoursStart ?? null,
+      quietHoursEnd: prefs.quietHoursEnd ?? null,
+      timezone: prefs.timezone ?? null,
+    };
+  }
+
   @Get('notification-preferences')
   @UseGuards(JwtAuthGuard)
   async getNotificationPreferences(@GetUser('id') userId: number) {
     const user = await this.userService.findById(userId);
     if (!user) throw new NotFoundException('User not found');
-    return user.notificationPreferences || {};
+    return this.getNotificationPreferencesResponse(user.notificationPreferences || {});
   }
 
   @Patch('notification-preferences')
@@ -247,13 +291,31 @@ export class UserController {
       throw new NotFoundException('User not found');
     }
 
-    user.notificationPreferences = {
-      ...(user.notificationPreferences || {}),
-      ...dto,
-    };
+    const current = user.notificationPreferences || {};
+
+    // Merge channel preferences
+    if (dto.reactions) current.reactions = { ...current.reactions, ...dto.reactions };
+    if (dto.comments) current.comments = { ...current.comments, ...dto.comments };
+    if (dto.mentions) current.mentions = { ...current.mentions, ...dto.mentions };
+    if (dto.tips) current.tips = { ...current.tips, ...dto.tips };
+    if (dto.reports) current.reports = { ...current.reports, ...dto.reports };
+    if (dto.system) current.system = { ...current.system, ...dto.system };
+
+    // Merge legacy flat booleans
+    if (dto.message !== undefined) current.message = dto.message;
+    if (dto.reaction !== undefined) current.reaction = dto.reaction;
+    if (dto.moderation !== undefined) current.moderation = dto.moderation;
+
+    // Quiet hours
+    if (dto.enableQuietHours !== undefined) current.enableQuietHours = dto.enableQuietHours;
+    if (dto.quietHoursStart !== undefined) current.quietHoursStart = dto.quietHoursStart;
+    if (dto.quietHoursEnd !== undefined) current.quietHoursEnd = dto.quietHoursEnd;
+    if (dto.timezone !== undefined) current.timezone = dto.timezone;
+
+    user.notificationPreferences = current;
 
     const savedUser = await this.userService.saveUser(user);
-    return savedUser.notificationPreferences;
+    return this.getNotificationPreferencesResponse(savedUser.notificationPreferences || {});
   }
 
   @UseGuards(JwtAuthGuard)

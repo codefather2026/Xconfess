@@ -3,6 +3,7 @@ import {
   NotFoundException,
   BadRequestException,
   ConflictException,
+  GatewayTimeoutException,
   Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -11,6 +12,7 @@ import { Tip, TipVerificationStatus } from './entities/tip.entity';
 import { AnonymousConfession } from '../confession/entities/confession.entity';
 import { StellarService } from '../stellar/stellar.service';
 import { VerifyTipDto } from './dto/verify-tip.dto';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import * as crypto from 'crypto';
 
 export interface TipStats {
@@ -54,6 +56,7 @@ export class TippingService {
     @InjectRepository(AnonymousConfession)
     private readonly confessionRepository: Repository<AnonymousConfession>,
     private readonly stellarService: StellarService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   /**
@@ -280,13 +283,27 @@ export class TippingService {
   async verifyAndRecordTip(
     confessionId: string,
     dto: VerifyTipDto,
+    requestId?: string,
   ): Promise<TipVerificationResult> {
+    this.logger.log({
+      message: 'Tip verify started',
+      requestId,
+      confessionId,
+      txHash: dto.txId,
+    });
+
     // Check if confession exists
     const confession = await this.confessionRepository.findOne({
       where: { id: confessionId },
     });
 
     if (!confession) {
+      this.logger.warn({
+        message: 'Confession not found',
+        requestId,
+        confessionId,
+        txHash: dto.txId,
+      });
       throw new NotFoundException(
         `Confession with ID ${confessionId} not found`,
       );
@@ -301,10 +318,13 @@ export class TippingService {
     );
 
     if (existingIdempotentTip) {
-      // This exact request already completed - return canonical response
-      this.logger.debug(
-        `Idempotent replay detected for tip ${dto.txId} on confession ${confessionId}`,
-      );
+      this.logger.debug({
+        message: 'Idempotent replay detected',
+        requestId,
+        confessionId,
+        txHash: dto.txId,
+        tipId: existingIdempotentTip.id,
+      });
 
       return {
         tip: existingIdempotentTip,
@@ -319,10 +339,13 @@ export class TippingService {
     });
 
     if (tipByTxId && tipByTxId.confessionId !== confessionId) {
-      // Conflict: txId already used for a different confession
-      this.logger.warn(
-        `Conflict: txId ${dto.txId} attempted for confession ${confessionId} but already used for ${tipByTxId.confessionId}`,
-      );
+      this.logger.warn({
+        message: 'Conflict: txId already used for a different confession',
+        requestId,
+        confessionId,
+        txHash: dto.txId,
+        originalConfessionId: tipByTxId.confessionId,
+      });
 
       throw new ConflictException({
         message: `Transaction ${dto.txId} was already used for a different confession`,
@@ -355,9 +378,45 @@ export class TippingService {
 
     try {
       // Verify transaction on-chain
-      const isValid = await this.stellarService.verifyTransaction(dto.txId);
+      let isValid = false;
+      try {
+        isValid = await this.stellarService.verifyTransaction(dto.txId, requestId);
+      } catch (verifyError: any) {
+        this.logger.warn({
+          message: 'Network error verifying transaction, marking for retry',
+          requestId,
+          confessionId,
+          txHash: dto.txId,
+          error: verifyError.message,
+        });
+        await this.updateRetryMetadata(dto.txId, 'network_error', {
+          error: verifyError.message,
+          attemptedAt: new Date().toISOString(),
+        });
+        await this.releaseProcessingLock(dto.txId);
+        // Return pending tip for retry reconciliation
+        const pendingTip = await this.tipRepository.findOne({
+          where: { txId: dto.txId },
+        });
+        if (pendingTip) {
+          throw new ConflictException({
+            message: `Transaction ${dto.txId} verification temporarily failed due to network error. Will be retried.`,
+            conflictReason: 'NETWORK_ERROR',
+            canRetry: true,
+          });
+        }
+        throw new GatewayTimeoutException(
+          `Failed to verify transaction ${dto.txId} on Stellar network. Please retry.`,
+        );
+      }
 
       if (!isValid) {
+        this.logger.warn({
+          message: 'Transaction not found or invalid on Stellar network',
+          requestId,
+          confessionId,
+          txHash: dto.txId,
+        });
         await this.updateRetryMetadata(dto.txId, 'not_found', {
           error: 'Transaction not found on chain',
           attemptedAt: new Date().toISOString(),
@@ -369,7 +428,34 @@ export class TippingService {
       }
 
       // Fetch transaction details from Horizon to get amount and sender
-      const txData = await this.fetchTransactionData(dto.txId);
+      let txData: any;
+      try {
+        txData = await this.fetchTransactionData(dto.txId);
+      } catch (fetchError: any) {
+        const isRetryable =
+          fetchError instanceof GatewayTimeoutException ||
+          fetchError instanceof NotFoundException;
+        if (isRetryable) {
+          this.logger.warn({
+            message: 'Retryable error fetching transaction data',
+            requestId,
+            confessionId,
+            txHash: dto.txId,
+            error: fetchError.message,
+          });
+          await this.updateRetryMetadata(dto.txId, 'fetch_retryable', {
+            error: fetchError.message,
+            attemptedAt: new Date().toISOString(),
+          });
+          await this.releaseProcessingLock(dto.txId);
+          throw new ConflictException({
+            message: `Transaction ${dto.txId} data fetch failed temporarily. Will be retried.`,
+            conflictReason: 'NETWORK_ERROR',
+            canRetry: true,
+          });
+        }
+        throw fetchError;
+      }
       const processedData = await this.processTransactionData(txData, dto.txId);
 
       // Minimum tip amount check (0.1 XLM)
@@ -434,6 +520,24 @@ export class TippingService {
       // Release lock after successful processing
       await this.releaseProcessingLock(dto.txId);
 
+      this.eventEmitter.emit('tip.verified', {
+        tipId: savedTip.id,
+        confessionId,
+        txId: dto.txId,
+        amount: processedData.amount,
+        requestId,
+      });
+
+      this.logger.log({
+        message: 'Tip verify succeeded',
+        requestId,
+        confessionId,
+        txHash: dto.txId,
+        tipId: savedTip.id,
+        amount: processedData.amount,
+        isNew: !existingTip,
+      });
+
       return {
         tip: savedTip,
         isNew: !existingTip,
@@ -442,16 +546,53 @@ export class TippingService {
     } catch (error) {
       // Release lock on error
       await this.releaseProcessingLock(dto.txId);
+
+      this.eventEmitter.emit('tip.verification_failed', {
+        confessionId,
+        txId: dto.txId,
+        requestId,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+
       throw error;
     }
   }
 
   private async fetchTransactionData(txId: string): Promise<any> {
     const horizonUrl = this.stellarService.getHorizonTxUrl(txId);
-    const response = await fetch(horizonUrl);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+    let response: Response;
+    try {
+      response = await fetch(horizonUrl, { signal: controller.signal });
+    } catch (error: any) {
+      clearTimeout(timeoutId);
+      if (error.name === 'AbortError') {
+        throw new GatewayTimeoutException('Horizon request timed out');
+      }
+      throw new GatewayTimeoutException(
+        `Network error fetching transaction: ${error.message}`,
+      );
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
+    if (response.status === 404) {
+      throw new NotFoundException('Transaction not found on Stellar network');
+    }
 
     if (!response.ok) {
-      throw new BadRequestException('Failed to fetch transaction details');
+      const body = await response.text().catch(() => '');
+      this.logger.warn({
+        event: 'horizon_error',
+        txId,
+        status: response.status,
+        body,
+      });
+      throw new BadRequestException(
+        `Horizon returned status ${response.status}`,
+      );
     }
 
     return response.json();

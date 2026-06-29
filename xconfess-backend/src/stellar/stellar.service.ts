@@ -10,6 +10,9 @@ import { AppException } from '../common/errors/app-exception';
 import { ErrorCode } from '../common/errors/error-codes';
 import { HttpStatus } from '@nestjs/common';
 import * as crypto from 'crypto';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { AnonymousConfession } from '../confession/entities/confession.entity';
 
 export interface AnchorData {
   stellarTxHash: string;
@@ -29,6 +32,8 @@ export class StellarService {
     private stellarConfig: StellarConfigService,
     private txBuilder: TransactionBuilderService,
     private deploymentMetadataService: DeploymentMetadataService,
+    @InjectRepository(AnonymousConfession)
+    private readonly confessionRepo: Repository<AnonymousConfession>,
   ) {
     this.contractId = this.configService.get<string>(
       'CONFESSION_ANCHOR_CONTRACT',
@@ -216,7 +221,7 @@ export class StellarService {
   /**
    * Verify a transaction exists on the Stellar network
    */
-  async verifyTransaction(txHash: string): Promise<boolean> {
+  async verifyTransaction(txHash: string, requestId?: string): Promise<boolean> {
     if (!this.isValidTxHash(txHash)) {
       return false;
     }
@@ -231,7 +236,11 @@ export class StellarService {
       return data.successful === true;
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      this.logger.error(`Error verifying Stellar transaction: ${message}`);
+      this.logger.error({
+        message: `Error verifying Stellar transaction: ${message}`,
+        requestId,
+        txHash,
+      });
       return false;
     }
   }
@@ -269,6 +278,61 @@ export class StellarService {
       contractId: this.contractId,
       network: this.network,
       horizonUrl: this.horizonUrl,
+    };
+  }
+
+  /**
+   * Get paginated anchored confessions for a user
+   */
+  async getUserAnchors(
+    userId: number,
+    page: number = 1,
+    limit: number = 10,
+  ): Promise<{
+    data: Array<{
+      confessionId: string;
+      stellarTxHash: string;
+      stellarHash: string;
+      anchoredAt: Date;
+      contractId: string;
+      stellarExplorerUrl: string;
+      message: string;
+    }>;
+    meta: { total: number; page: number; limit: number; totalPages: number };
+  }> {
+    const skip = (page - 1) * limit;
+
+    const [confessions, total] = await this.confessionRepo
+      .createQueryBuilder('confession')
+      .innerJoin('confession.anonymousUser', 'anonUser')
+      .innerJoin('anonUser.userLinks', 'userLink')
+      .innerJoin('userLink.user', 'user')
+      .where('user.id = :userId', { userId })
+      .andWhere('confession.isAnchored = true')
+      .andWhere('confession.isDeleted = false')
+      .orderBy('confession.anchoredAt', 'DESC')
+      .skip(skip)
+      .take(limit)
+      .getManyAndCount();
+
+    const data = confessions.map((conf) => ({
+      confessionId: conf.id,
+      stellarTxHash: conf.stellarTxHash,
+      stellarHash: conf.stellarHash,
+      anchoredAt: conf.anchoredAt,
+      contractId: this.contractId,
+      stellarExplorerUrl: this.getExplorerUrl(conf.stellarTxHash),
+      message: '',
+    }));
+
+    return {
+      data,
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
     };
   }
 }

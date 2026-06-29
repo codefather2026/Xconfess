@@ -11,6 +11,7 @@ describe('TippingService', () => {
   let mockTipRepo: any;
   let mockConfessionRepo: any;
   let mockStellarService: any;
+  let mockEventEmitter: any;
 
   beforeEach(() => {
     mockTipRepo = {
@@ -47,10 +48,15 @@ describe('TippingService', () => {
         .mockReturnValue('https://horizon/testnet/txs/tx123'),
     };
 
+    mockEventEmitter = {
+      emit: jest.fn(),
+    };
+
     service = new TippingService(
       mockTipRepo,
       mockConfessionRepo,
       mockStellarService,
+      mockEventEmitter,
     );
   });
 
@@ -119,7 +125,9 @@ describe('TippingService', () => {
       };
 
       mockConfessionRepo.findOne.mockResolvedValue({ id: confessionId });
-      mockTipRepo.findOne.mockResolvedValue(existingTip);
+      mockTipRepo.findOne
+        .mockResolvedValueOnce(null) // idempotency check returns null
+        .mockResolvedValueOnce(existingTip); // txId conflict check returns existingTip
 
       await expect(
         service.verifyAndRecordTip(confessionId, mockDto),
@@ -191,6 +199,82 @@ describe('TippingService', () => {
       await expect(
         service.verifyAndRecordTip(confessionId, mockDto),
       ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('correlation log fields', () => {
+    const mockDto = { txId: 'abc123tx' };
+    const confessionId = 'conf-456';
+    const requestId = 'req-uuid-789';
+
+    beforeEach(() => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            _embedded: {
+              operations: [
+                {
+                  type: 'payment',
+                  asset_type: 'native',
+                  amount: '5.0',
+                  from: 'GABC123',
+                },
+              ],
+            },
+          }),
+      });
+    });
+
+    it('emits a start log containing requestId, confessionId, and txHash', async () => {
+      mockConfessionRepo.findOne.mockResolvedValue({ id: confessionId });
+      mockTipRepo.findOne.mockResolvedValue(null);
+      mockStellarService.verifyTransaction.mockResolvedValue(true);
+
+      const logSpy = jest.spyOn((service as any).logger, 'log');
+
+      await service.verifyAndRecordTip(confessionId, mockDto, requestId);
+
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          requestId,
+          confessionId,
+          txHash: mockDto.txId,
+        }),
+      );
+    });
+
+    it('emits a success log containing requestId, confessionId, txHash, and tipId', async () => {
+      mockConfessionRepo.findOne.mockResolvedValue({ id: confessionId });
+      mockTipRepo.findOne.mockResolvedValue(null);
+      mockStellarService.verifyTransaction.mockResolvedValue(true);
+
+      const logSpy = jest.spyOn((service as any).logger, 'log');
+
+      const result = await service.verifyAndRecordTip(confessionId, mockDto, requestId);
+
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: 'Tip verify succeeded',
+          requestId,
+          confessionId,
+          txHash: mockDto.txId,
+          tipId: result.tip.id,
+        }),
+      );
+    });
+
+    it('passes requestId to stellarService.verifyTransaction', async () => {
+      mockConfessionRepo.findOne.mockResolvedValue({ id: confessionId });
+      mockTipRepo.findOne.mockResolvedValue(null);
+      mockStellarService.verifyTransaction.mockResolvedValue(true);
+
+      await service.verifyAndRecordTip(confessionId, mockDto, requestId);
+
+      expect(mockStellarService.verifyTransaction).toHaveBeenCalledWith(
+        mockDto.txId,
+        requestId,
+      );
     });
   });
 

@@ -1,11 +1,11 @@
-import {
+﻿import {
   Injectable,
   NotFoundException,
   BadRequestException,
   Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { EntityManager, In, Repository } from 'typeorm';
+import { EntityManager, In, Repository, LessThan } from 'typeorm';
 import { Report, ReportStatus, ReportType } from '../entities/report.entity'
 import { AnonymousConfession } from '../../confession/entities/confession.entity';
 import { User, UserRole } from '../../user/entities/user.entity';
@@ -18,6 +18,8 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { UserAnonymousUser } from '../../user/entities/user-anonymous-link.entity';
 import { ConfigService } from '@nestjs/config';
 import { Tip } from '../../tipping/entities/tip.entity';
+import { AuditLogService } from '../../audit-log/audit-log.service';
+import { JobManagementService } from '../../notifications/services/job-management.service';
 
 export interface BulkResolveOutcome {
   id: string;
@@ -65,6 +67,7 @@ export class AdminService {
     private readonly moderationTemplateService: ModerationTemplateService,
     private readonly configService: ConfigService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly auditLogService: AuditLogService,
     private readonly jobManagementService: JobManagementService,
   ) {}
 
@@ -433,6 +436,11 @@ export class AdminService {
   }
 
   // Users
+  
+  async unlockAccount(email: string): Promise<void> {
+    await this.lockoutService.clearLockout(email);
+    this.logger.log(Admin unlocked account: \);
+  }
   async banUser(
     userId: number,
     adminId: number,
@@ -687,6 +695,135 @@ export class AdminService {
     };
   }
 
+  async getReportsCursor(
+    status?: ReportStatus,
+    type?: ReportType,
+    startDate?: Date,
+    endDate?: Date,
+    limit = 20,
+    cursor?: string,
+  ): Promise<CursorPaginatedResponseDto<Report>> {
+    const parsedCursor = decodeCursor<{ id: string; createdAt: string }>(cursor);
+    const take = Math.min(limit + 1, PAGINATION.MAX_LIMIT);
+
+    const query = this.reportRepository
+      .createQueryBuilder('report')
+      .leftJoinAndSelect('report.confession', 'confession')
+      .leftJoinAndSelect('report.reporter', 'reporter')
+      .leftJoinAndSelect('report.resolver', 'resolver')
+      .orderBy('report.createdAt', 'DESC')
+      .addOrderBy('report.id', 'DESC')
+      .take(take);
+
+    if (parsedCursor) {
+      query.andWhere(
+        '(report.createdAt < :cursorDate OR (report.createdAt = :cursorDate AND report.id < :cursorId))',
+        {
+          cursorDate: new Date(parsedCursor.createdAt),
+          cursorId: parsedCursor.id,
+        },
+      );
+    }
+
+    if (status) {
+      query.andWhere('report.status = :status', { status });
+    }
+    if (type) {
+      query.andWhere('report.type = :type', { type });
+    }
+    if (startDate) {
+      query.andWhere('report.createdAt >= :startDate', { startDate });
+    }
+    if (endDate) {
+      query.andWhere('report.createdAt <= :endDate', { endDate });
+    }
+
+    const reports = await query.getMany();
+    const hasMore = reports.length > limit;
+    if (hasMore) reports.pop();
+
+    const mapped = reports.map((r) => {
+      if (r.confession?.message) {
+        r.confession.message = this.safeDecryptConfessionMessage(r.confession.message);
+      }
+      return r;
+    });
+
+    const nextCursor = hasMore && reports.length > 0
+      ? encodeCursor({ id: reports[reports.length - 1].id, createdAt: reports[reports.length - 1].createdAt.toISOString() })
+      : null;
+
+    return new CursorPaginatedResponseDto(mapped, nextCursor, hasMore, limit);
+  }
+
+  async searchUsersCursor(
+    query: string,
+    limit = 20,
+    cursor?: string,
+  ): Promise<CursorPaginatedResponseDto<User>> {
+    const parsedCursor = decodeCursor<{ id: number; createdAt: string }>(cursor);
+    const take = Math.min(limit + 1, PAGINATION.MAX_LIMIT);
+
+    const qb = this.userRepository
+      .createQueryBuilder('user')
+      .where('user.username ILIKE :query', { query: `%${query}%` })
+      .orderBy('user.createdAt', 'DESC')
+      .addOrderBy('user.id', 'DESC')
+      .take(take);
+
+    if (parsedCursor) {
+      qb.andWhere(
+        '(user.createdAt < :cursorDate OR (user.createdAt = :cursorDate AND user.id < :cursorId))',
+        {
+          cursorDate: new Date(parsedCursor.createdAt),
+          cursorId: parsedCursor.id,
+        },
+      );
+    }
+
+    const users = await qb.getMany();
+    const hasMore = users.length > limit;
+    if (hasMore) users.pop();
+
+    const nextCursor = hasMore && users.length > 0
+      ? encodeCursor({ id: users[users.length - 1].id, createdAt: users[users.length - 1].createdAt.toISOString() })
+      : null;
+
+    return new CursorPaginatedResponseDto(users, nextCursor, hasMore, limit);
+  }
+
+  async getReportStats(): Promise<{
+    pendingCount: number;
+    oldestUnresolvedAge: number | null;
+    resolvedTodayCount: number;
+  }> {
+    const pendingCount = await this.reportRepository.count({
+      where: { status: ReportStatus.PENDING },
+    });
+
+    const oldestPending = await this.reportRepository.findOne({
+      where: { status: ReportStatus.PENDING },
+      order: { createdAt: 'ASC' },
+    });
+
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    const resolvedToday = await this.reportRepository
+      .createQueryBuilder('report')
+      .where('report.status = :status', { status: ReportStatus.RESOLVED })
+      .andWhere('report.resolvedAt >= :todayStart', { todayStart })
+      .getCount();
+
+    return {
+      pendingCount,
+      oldestUnresolvedAge: oldestPending
+        ? Math.floor((Date.now() - oldestPending.createdAt.getTime()) / 1000)
+        : null,
+      resolvedTodayCount: resolvedToday,
+    };
+  }
+
   // Analytics
   async getAnalytics(startDate?: Date, endDate?: Date) {
     const start = startDate || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
@@ -792,3 +929,4 @@ export class AdminService {
     };
   }
 }
+

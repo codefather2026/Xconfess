@@ -59,48 +59,51 @@ write_manifest() {
   local generated_at
   generated_at="$(timestamp_utc)"
 
-  "$PYTHON_BIN" - "$CONTRACTS_DIR" "$TARGET_DIR" "$output_file" "$generated_at" "${CONTRACT_CRATES[@]}" <<'PY'
-import hashlib
-import json
-import pathlib
-import re
-import sys
+  require_cmd sha256sum
 
-contracts_dir = pathlib.Path(sys.argv[1])
-target_dir = pathlib.Path(sys.argv[2])
-output_file = pathlib.Path(sys.argv[3])
-generated_at = sys.argv[4]
-crates = sys.argv[5:]
+  {
+    printf '{\n'
+    printf '  "contracts": {\n'
 
-def crate_version(crate: str) -> str:
-    cargo_toml = contracts_dir / "contracts" / crate / "Cargo.toml"
-    text = cargo_toml.read_text(encoding="utf-8")
-    match = re.search(r'(?m)^version\s*=\s*"([^"]+)"\s*$', text)
-    if not match:
-        raise RuntimeError(f"No version found in {cargo_toml}")
-    return match.group(1)
+    local idx=0
+    local count=${#CONTRACT_CRATES[@]}
+    for crate in "${CONTRACT_CRATES[@]}"; do
+      local wasm_name
+      wasm_name="$(crate_to_wasm_name "$crate")"
+      local wasm_path="$TARGET_DIR/$wasm_name"
+      local cargo_toml="$CONTRACTS_DIR/contracts/$crate/Cargo.toml"
+      local version
+      version="$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$cargo_toml" | head -n 1)"
+      if [[ -z "$version" ]]; then
+        echo "No version found in $cargo_toml" >&2
+        exit 1
+      fi
 
-contracts = {}
-for crate in crates:
-    wasm_name = crate.replace("-", "_") + ".wasm"
-    wasm_path = target_dir / wasm_name
-    content = wasm_path.read_bytes()
-    contracts[crate] = {
-        "wasm_file": str(wasm_path.relative_to(contracts_dir)),
-        "version": crate_version(crate),
-        "sha256": hashlib.sha256(content).hexdigest(),
-        "bytes": len(content),
-    }
+      local sha256
+      sha256="$(sha256sum "$wasm_path" | awk '{print $1}')"
+      local bytes
+      bytes="$(wc -c < "$wasm_path" | tr -d '[:space:]')"
+      local wasm_file="target/wasm32-unknown-unknown/release/$wasm_name"
 
-manifest = {
-    "generated_at_utc": generated_at,
-    "target": "wasm32-unknown-unknown",
-    "profile": "release",
-    "contracts": contracts,
-}
+      printf '    "%s": {\n' "$crate"
+      printf '      "bytes": %s,\n' "$bytes"
+      printf '      "sha256": "%s",\n' "$sha256"
+      printf '      "version": "%s",\n' "$version"
+      printf '      "wasm_file": "%s"\n' "$wasm_file"
+      if [[ $idx -lt $((count - 1)) ]]; then
+        printf '    },\n'
+      else
+        printf '    }\n'
+      fi
+      idx=$((idx + 1))
+    done
 
-output_file.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-PY
+    printf '  },\n'
+    printf '  "generated_at_utc": "%s",\n' "$generated_at"
+    printf '  "profile": "release",\n'
+    printf '  "target": "wasm32-unknown-unknown"\n'
+    printf '}\n'
+  } > "$output_file"
 }
 
 build_all() {
@@ -112,7 +115,7 @@ build_all() {
   popd >/dev/null
   verify_wasm_outputs
 
-  mkdir -p "$REPO_ROOT/deployments"
+  [[ -d "$REPO_ROOT/deployments" ]] || mkdir -p "$REPO_ROOT/deployments"
   local manifest_file="$REPO_ROOT/deployments/contract-wasm-manifest.json"
   write_manifest "$manifest_file"
   echo "Build complete. Manifest: $manifest_file"
@@ -120,7 +123,7 @@ build_all() {
 
 verify_only() {
   verify_wasm_outputs
-  mkdir -p "$REPO_ROOT/deployments"
+  [[ -d "$REPO_ROOT/deployments" ]] || mkdir -p "$REPO_ROOT/deployments"
   local manifest_file="$REPO_ROOT/deployments/contract-wasm-manifest.json"
   write_manifest "$manifest_file"
   echo "Verification complete. Manifest: $manifest_file"

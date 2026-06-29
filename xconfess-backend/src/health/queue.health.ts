@@ -9,10 +9,11 @@ import { Queue } from 'bullmq';
 import { ConfigService } from '@nestjs/config';
 
 interface QueueDetail {
-  status: 'up' | 'down';
+  status: 'up' | 'down' | 'degraded';
   workers?: number;
   counts?: Record<string, number>;
   error?: string;
+  latencyMs?: number;
 }
 
 /**
@@ -94,40 +95,48 @@ export class QueueHealthIndicator extends HealthIndicator {
       },
     ];
 
+    const latencyThreshold =
+      this.configService.get<number>('REDIS_QUEUE_LATENCY_THRESHOLD_MS') || 250;
+
     const details: Record<string, QueueDetail> = {};
     let allHealthy = true;
 
-    await Promise.all(
-      queues.map(async ({ name, queue, requiresWorkers }) => {
-        try {
-          const [counts, workers] = await Promise.all([
-            queue.getJobCounts('active', 'waiting', 'failed', 'delayed'),
-            queue.getWorkers(),
-          ]);
+    for (const { name, queue, requiresWorkers } of queues) {
+      try {
+        const [counts, workers, client] = await Promise.all([
+          queue.getJobCounts('active', 'waiting', 'failed', 'delayed'),
+          queue.getWorkers(),
+          queue.client,
+        ]);
 
-          const workerCount = workers.length;
-          const healthy = !requiresWorkers || workerCount > 0;
+        const start = Date.now();
+        await (client as unknown as { ping: () => Promise<string> }).ping();
+        const latencyMs = Date.now() - start;
 
-          if (!healthy) {
-            allHealthy = false;
-          }
+        const workerCount = workers.length;
+        const hasWorkers = !requiresWorkers || workerCount > 0;
+        const isDegraded = latencyMs >= latencyThreshold;
+        const healthy = hasWorkers && !isDegraded;
 
-          details[name] = {
-            status: healthy ? 'up' : 'down',
-            workers: workerCount,
-            counts,
-          };
-        } catch (error: unknown) {
-          const message =
-            error instanceof Error ? error.message : String(error);
-          this.logger.error(
-            `Queue health check failed for "${name}": ${message}`,
-          );
+        if (!healthy) {
           allHealthy = false;
-          details[name] = { status: 'down', error: message };
         }
-      }),
-    );
+
+        details[name] = {
+          status: hasWorkers ? (isDegraded ? 'degraded' : 'up') : 'down',
+          workers: workerCount,
+          counts,
+          latencyMs,
+        };
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.error(
+          `Queue health check failed for "${name}": ${message}`,
+        );
+        allHealthy = false;
+        details[name] = { status: 'down', error: message };
+      }
+    }
 
     if (!allHealthy) {
       throw new HealthCheckError(

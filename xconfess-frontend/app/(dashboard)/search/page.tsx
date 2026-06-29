@@ -103,11 +103,22 @@ function hasActiveFilters(f: SearchFilters): boolean {
     (f.sort && f.sort !== "newest") ||
     f.gender
   );
+import { useState, useEffect, useCallback } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
+import { Search, Filter, Calendar, TrendingUp } from "lucide-react";
+import { useDebounce } from "@/lib/hooks/useDebounce";
+import { SearchResultsSkeleton } from "@/app/components/confession/LoadingSkeleton";
+
+interface Confession {
+  id: string;
+  content: string;
+  created_at: string;
+  view_count: number;
+  reactions?: { like: number; love: number };
 }
 
 export default function SearchPage() {
   const router = useRouter();
-  const pathname = usePathname();
   const searchParams = useSearchParams();
   const { user } = useAuth();
 
@@ -292,8 +303,56 @@ export default function SearchPage() {
       setQuery(suggestion);
       updateUrl(suggestion, filters);
       setShowDiscoveryDropdown(false);
+  const [query, setQuery] = useState(searchParams.get("q") || "");
+  const [results, setResults] = useState<Confession[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [category, setCategory] = useState("");
+  const [minReactions, setMinReactions] = useState("");
+  const [sortBy, setSortBy] = useState("relevance");
+  const [showFilters, setShowFilters] = useState(false);
+
+  const debouncedQuery = useDebounce(query, 300);
+
+  const searchConfessions = useCallback(
+    async (searchQuery: string) => {
+      if (!searchQuery.trim()) {
+        setResults([]);
+        return;
+      }
+
+      setLoading(true);
+      try {
+        const params = new URLSearchParams({ q: searchQuery });
+        if (dateFrom) params.append("dateFrom", dateFrom);
+        if (dateTo) params.append("dateTo", dateTo);
+        if (category) params.append("category", category);
+        if (minReactions) params.append("minReactions", minReactions);
+        params.append("sortBy", sortBy);
+
+        const res = await fetch(`/api/confessions/search?${params}`);
+        if (res.ok) {
+          const data = await res.json();
+          setResults(data.results || data || []);
+
+          // Save to recent searches
+          const recentSearches = JSON.parse(
+            localStorage.getItem("recentSearches") || "[]",
+          );
+          const updated = [
+            searchQuery,
+            ...recentSearches.filter((s: string) => s !== searchQuery),
+          ].slice(0, 5);
+          localStorage.setItem("recentSearches", JSON.stringify(updated));
+        }
+      } catch (error) {
+        console.error("Search failed:", error);
+      } finally {
+        setLoading(false);
+      }
     },
-    [filters, updateUrl],
+    [dateFrom, dateTo, category, minReactions, sortBy],
   );
 
   const handleApplyPreset = useCallback((presetFilters: any) => {
@@ -362,40 +421,80 @@ export default function SearchPage() {
   };
 
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
-        e.preventDefault();
-        const el = document.querySelector<HTMLInputElement>(
-          "[data-search-input]",
-        );
-        el?.focus();
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, []);
+    if (debouncedQuery) {
+      searchConfessions(debouncedQuery);
+      router.push(`/search?q=${encodeURIComponent(debouncedQuery)}`, {
+        scroll: false,
+      });
+    }
+  }, [debouncedQuery, searchConfessions, router]);
 
-  useFocusTrap({
-    active: sidebarOpen,
-    containerRef: sidebarRef,
-    initialFocusRef: closeButtonRef,
-    restoreFocusRef: filterButtonRef,
-    onEscape: () => setSidebarOpen(false),
-    trapFocus: true,
-  });
+  const highlightText = (text: string, query: string) => {
+    if (!query.trim()) return text;
+
+    const parts = text.split(new RegExp(`(${query})`, "gi"));
+    return parts.map((part, i) =>
+      part.toLowerCase() === query.toLowerCase() ? (
+        <mark key={i} className="bg-yellow-200 dark:bg-yellow-800">
+          {part}
+        </mark>
+      ) : (
+        part
+      ),
+    );
+  };
+
+  const recentSearches =
+    typeof window !== "undefined"
+      ? JSON.parse(localStorage.getItem("recentSearches") || "[]")
+      : [];
 
   return (
-    <div className="min-h-screen bg-zinc-950">
-      <div className="container mx-auto py-6 px-4 sm:px-6 md:px-8 lg:py-8 lg:px-10">
-        <header className="mb-6 lg:mb-8 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-white mb-2">
-              Search confessions
-            </h1>
-            <p className="text-zinc-400 text-sm lg:text-base">
-              Find confessions by keyword, date, reactions, and more.
-            </p>
-          </div>
+    <div className="max-w-4xl mx-auto px-4 py-8">
+      <div className="mb-6">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search confessions..."
+            className="w-full pl-10 pr-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          />
+          <button
+            onClick={() => setShowFilters(!showFilters)}
+            className="absolute right-3 top-1/2 -translate-y-1/2 p-2 hover:bg-gray-100 rounded-md"
+          >
+            <Filter className="w-5 h-5" />
+          </button>
+        </div>
+
+        {showFilters && (
+          <div className="mt-4 p-4 border rounded-lg bg-gray-50 dark:bg-gray-800 space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-medium mb-1">
+                  Date From
+                </label>
+                <input
+                  type="date"
+                  value={dateFrom}
+                  onChange={(e) => setDateFrom(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-md"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">
+                  Date To
+                </label>
+                <input
+                  type="date"
+                  value={dateTo}
+                  onChange={(e) => setDateTo(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-md"
+                />
+              </div>
+            </div>
 
           <div className="flex flex-col items-start md:items-end gap-1.5">
             <div className="relative group inline-flex items-center gap-2">
@@ -421,14 +520,51 @@ export default function SearchPage() {
                   <span>Log in to enable saved search monitoring.</span>
                 </div>
               )}
+            <div>
+              <label className="block text-sm font-medium mb-1">Category</label>
+              <select
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                className="w-full px-3 py-2 border rounded-md"
+              >
+                <option value="">All Categories</option>
+                <option value="humor">Humor</option>
+                <option value="serious">Serious</option>
+                <option value="relationship">Relationship</option>
+                <option value="work">Work</option>
+              </select>
             </div>
-            {saveStatus && (
-              <span className="text-xs text-emerald-400 animate-fade-in">
-                {saveStatus}
-              </span>
-            )}
+
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                Min Reactions
+              </label>
+              <input
+                type="number"
+                value={minReactions}
+                onChange={(e) => setMinReactions(e.target.value)}
+                placeholder="0"
+                min="0"
+                className="w-full px-3 py-2 border rounded-md"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-1">Sort By</label>
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value)}
+                className="w-full px-3 py-2 border rounded-md"
+              >
+                <option value="relevance">Relevance</option>
+                <option value="recent">Most Recent</option>
+                <option value="popular">Most Popular</option>
+                <option value="reactions">Most Reactions</option>
+              </select>
+            </div>
           </div>
-        </header>
+        )}
+      </div>
 
         <div className="mb-6 flex flex-col sm:flex-row gap-4 relative" ref={dropdownRef}>
           <div className="flex-1 min-w-0 relative">
@@ -512,51 +648,63 @@ export default function SearchPage() {
             <Filter className="h-4 w-4" />
             <span>Filters</span>
           </button>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2 mb-6">
-          <FilterChips
-            filters={filters}
-            query={query}
-            onRemoveFilter={handleRemoveFilter}
-            onClearAll={handleClearAll}
-            statusChip={
-              effectiveStatusMeta?.partial
-                ? { label: "Partial results", tone: "warning" }
-                : effectiveStatusMeta?.degraded
-                  ? { label: "Degraded search", tone: "warning" }
-                  : null
-            }
-          />
-        </div>
-
-        <div className="flex flex-col lg:flex-row gap-6 lg:gap-8">
-          <div
-            id="search-filters-sidebar"
-            className={cn(
-              "lg:w-80 lg:shrink-0",
-              sidebarOpen ? "block" : "hidden lg:block",
-            )}
-            role="complementary"
-            aria-label="Search filters"
-            ref={sidebarRef}
-          >
-            <div className="lg:hidden relative mb-4">
+      {!query && recentSearches.length > 0 && (
+        <div className="mb-6">
+          <h3 className="text-sm font-medium mb-2 text-gray-500">
+            Recent Searches
+          </h3>
+          <div className="flex flex-wrap gap-2">
+            {recentSearches.map((search: string, i: number) => (
               <button
-                type="button"
-                onClick={() => setSidebarOpen(false)}
-                className="absolute top-2 right-2 p-2 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
-                aria-label="Close filters"
-                ref={closeButtonRef}
+                key={i}
+                onClick={() => setQuery(search)}
+                className="px-3 py-1 text-sm bg-gray-100 dark:bg-gray-700 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600"
               >
-                <X className="h-4 w-4" />
+                {search}
               </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {loading && <SearchResultsSkeleton count={4} />}
+
+      {!loading && query && results.length === 0 && (
+        <div className="text-center py-12">
+          <Search className="w-12 h-12 mx-auto mb-4 text-gray-400" />
+          <h3 className="text-lg font-medium mb-2">No results found</h3>
+          <p className="text-gray-500">
+            Try different keywords or adjust your filters
+          </p>
+        </div>
+      )}
+
+      <div className="space-y-4">
+        {results.map((confession) => (
+          <div
+            key={confession.id}
+            className="p-4 border rounded-lg hover:shadow-md transition cursor-pointer"
+            onClick={() => router.push(`/confessions/${confession.id}`)}
+          >
+            <p className="text-gray-800 dark:text-gray-200 mb-2">
+              {highlightText(confession.content, query)}
+            </p>
+            <div className="flex items-center gap-4 text-sm text-gray-500">
+              <span>
+                {new Date(confession.created_at).toLocaleDateString()}
+              </span>
+              <span className="flex items-center gap-1">
+                <TrendingUp className="w-4 h-4" />
+                {confession.view_count} views
+              </span>
+              {confession.reactions && (
+                <span>
+                  {(confession.reactions.like || 0) +
+                    (confession.reactions.love || 0)}{" "}
+                  reactions
+                </span>
+              )}
             </div>
-            <FilterSidebar
-              filters={filters}
-              onApply={handleApplyFilters}
-              onReset={handleResetFilters}
-            />
           </div>
 
           <main className="flex-1 min-w-0">
@@ -660,6 +808,7 @@ export default function SearchPage() {
             )}
           </main>
         </div>
+        ))}
       </div>
     </div>
   );

@@ -1,4 +1,4 @@
-import {
+﻿import {
   Controller,
   Get,
   Patch,
@@ -36,6 +36,7 @@ import { TemplateCategory } from '../comment/entities/moderation-note-template.e
 import { Request } from 'express';
 import { GetUser } from '../auth/get-user.decorator';
 import { RequestUser } from '../auth/interfaces/jwt-payload.interface';
+import { StellarDiagnosticsService } from './services/stellar-diagnostics.service';
 import {
   IsString,
   IsEnum,
@@ -86,6 +87,22 @@ export class UpdateTemplateDto {
   isActive?: boolean;
 }
 
+export class ExportAuditDto {
+  @IsNotEmpty()
+  @IsString()
+  label: string;
+
+  @IsOptional()
+  rowCount?: number;
+
+  @IsOptional()
+  filters?: Record<string, unknown>;
+
+  @IsOptional()
+  @IsString()
+  requestId?: string;
+}
+
 type AuthedRequest = Request & { user?: RequestUser };
 
 const auditActionTypeValues = new Set<string>(
@@ -112,11 +129,12 @@ export class AdminController {
     private readonly moderationService: ModerationService,
     private readonly moderationTemplateService: ModerationTemplateService,
     private readonly auditLogService: AuditLogService,
+    private readonly stellarDiagnosticsService: StellarDiagnosticsService,
   ) {}
 
   // Reports
   @Get('reports')
-  @ApiOperation({ summary: 'List reports with optional filters' })
+  @ApiOperation({ summary: 'List reports with optional filters and cursor pagination' })
   @ApiQuery({
     name: 'status',
     required: false,
@@ -141,14 +159,14 @@ export class AdminController {
     type: String,
     example: '2026-04-30',
   })
-  @ApiQuery({ name: 'limit', required: false, type: Number, example: 50 })
-  @ApiQuery({ name: 'offset', required: false, type: Number, example: 0 })
+  @ApiQuery({ name: 'limit', required: false, type: Number, example: 20 })
+  @ApiQuery({ name: 'cursor', required: false, type: String, description: 'Opaque cursor for cursor-based pagination' })
   @ApiResponse({
     status: 200,
     description: 'Paginated report list.',
     schema: {
       example: {
-        reports: [
+        data: [
           {
             id: 'abc-123',
             confessionId: 'def-456',
@@ -156,9 +174,9 @@ export class AdminController {
             type: 'spam',
           },
         ],
-        total: 1,
-        limit: 50,
-        offset: 0,
+        nextCursor: 'eyJpZCI6MTIzLCJjcmVhdGVkQXQiOiIyMDI0LTAxLTAxVDAwOjAwOjAwWiJ9',
+        hasMore: false,
+        limit: 20,
       },
     },
   })
@@ -168,25 +186,35 @@ export class AdminController {
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
     @Query('limit') limit?: string,
-    @Query('offset') offset?: string,
+    @Query('cursor') cursor?: string,
   ) {
     const start = startDate ? new Date(startDate) : undefined;
     const end = endDate ? new Date(endDate) : undefined;
-    const [reports, total] = await this.adminService.getReports(
+    return this.adminService.getReportsCursor(
       status,
       type,
       start,
       end,
-      parseInt(limit || '50', 10),
-      parseInt(offset || '0', 10),
+      parseInt(limit || '20', 10),
+      cursor,
     );
+  }
 
-    return {
-      reports,
-      total,
-      limit: parseInt(limit || '50', 10),
-      offset: parseInt(offset || '0', 10),
-    };
+  @Get('reports/stats')
+  @ApiOperation({ summary: 'Get report queue health stats' })
+  @ApiResponse({
+    status: 200,
+    description: 'Report queue metrics.',
+    schema: {
+      example: {
+        pendingCount: 5,
+        oldestUnresolvedAge: 86400,
+        resolvedTodayCount: 3,
+      },
+    },
+  })
+  async getReportStats() {
+    return this.adminService.getReportStats();
   }
 
   @Get('reports/:id')
@@ -205,7 +233,7 @@ export class AdminController {
   @ApiBody({
     schema: {
       example: {
-        resolutionNotes: 'Content removed — violates community guidelines.',
+        resolutionNotes: 'Content removed â€” violates community guidelines.',
         templateId: 3,
       },
     },
@@ -252,7 +280,7 @@ export class AdminController {
     schema: {
       example: {
         reportIds: ['abc-123', 'def-456'],
-        notes: 'Batch resolution — content removed.',
+        notes: 'Batch resolution â€” content removed.',
       },
     },
   })
@@ -302,6 +330,9 @@ export class AdminController {
 
   @Patch('confessions/:id/hide')
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Hide a confession from public view (admin only)' })
+  @ApiParam({ name: 'id', description: 'Confession UUID' })
+  @ApiResponse({ status: 200, description: 'Confession hidden.' })
   async hideConfession(
     @Param('id') id: string,
     @Body() body: { reason?: string },
@@ -318,6 +349,9 @@ export class AdminController {
 
   @Patch('confessions/:id/unhide')
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Unhide a confession (admin only)' })
+  @ApiParam({ name: 'id', description: 'Confession UUID' })
+  @ApiResponse({ status: 200, description: 'Confession unhidden.' })
   async unhideConfession(
     @Param('id') id: string,
     @GetUser('id') adminId: number,
@@ -328,34 +362,35 @@ export class AdminController {
 
   // Users
   @Get('users/search')
-  @ApiOperation({ summary: 'Search users by username or email fragment' })
+  @ApiOperation({ summary: 'Search users by username with cursor pagination' })
   @ApiQuery({ name: 'q', description: 'Search query', example: 'alice' })
-  @ApiQuery({ name: 'limit', required: false, type: Number, example: 50 })
-  @ApiQuery({ name: 'offset', required: false, type: Number, example: 0 })
+  @ApiQuery({ name: 'limit', required: false, type: Number, example: 20 })
+  @ApiQuery({ name: 'cursor', required: false, type: String, description: 'Opaque cursor for cursor-based pagination' })
   @ApiResponse({
     status: 200,
-    description: 'Matching users.',
+    description: 'Matching users with cursor pagination.',
     schema: {
       example: {
-        users: [{ id: 1, username: 'alice_42', role: 'user' }],
-        total: 1,
+        data: [{ id: 1, username: 'alice_42', role: 'user' }],
+        nextCursor: null,
+        hasMore: false,
+        limit: 20,
       },
     },
   })
   async searchUsers(
     @Query('q') query: string,
     @Query('limit') limit?: string,
-    @Query('offset') offset?: string,
+    @Query('cursor') cursor?: string,
   ) {
     if (!query) {
-      return { users: [], total: 0 };
+      return { data: [], nextCursor: null, hasMore: false, limit: 20 };
     }
-    const [users, total] = await this.adminService.searchUsers(
+    return this.adminService.searchUsersCursor(
       query,
-      parseInt(limit || '50', 10),
-      parseInt(offset || '0', 10),
+      parseInt(limit || '20', 10),
+      cursor,
     );
-    return { users, total };
   }
 
   @Get('users/:id/history')
@@ -363,6 +398,16 @@ export class AdminController {
     return this.adminService.getUserHistory(parseInt(id, 10));
   }
 
+  
+  @Post('users/unlock-account')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Unlock a locked account by email' })
+  @ApiBody({ schema: { example: { email: 'user@example.com' } } })
+  @ApiResponse({ status: 200, description: 'Account unlocked.' })
+  async unlockAccount(@Body('email') email: string) {
+    await this.adminService.unlockAccount(email);
+    return { message: Account unlocked for \ };
+  }
   @Patch('users/:id/ban')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Ban a user account' })
@@ -428,6 +473,45 @@ export class AdminController {
   @HttpCode(HttpStatus.NO_CONTENT)
   async deleteTemplate(@Param('id') id: string) {
     await this.moderationTemplateService.delete(parseInt(id, 10));
+  }
+
+  // Stellar diagnostics (Issue #1119)
+  @Get('stellar/diagnostics')
+  @ApiOperation({
+    summary: 'Stellar network and contract diagnostics with Horizon liveness ping',
+    description:
+      'Returns configured network, contract IDs, and a live Horizon reachability check. ' +
+      'Never exposes secrets. Horizon unreachable returns a degraded indicator, not a 500.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Stellar diagnostics result',
+    schema: {
+      example: {
+        network: 'testnet',
+        horizonUrl: 'https://horizon-testnet.stellar.org',
+        sorobanRpcUrl: 'https://soroban-rpc-testnet.stellar.org',
+        contractIds: {
+          confessionAnchor: 'CBFR2MDZBQPTNBIJCT32MTDDQLW2AQNDWNO777F3QT6ANYKTHETQZWD3',
+          reputationBadges: null,
+          tippingSystem: null,
+        },
+        horizonStatus: 'ok',
+        horizonLatencyMs: 142,
+        deploymentMetadata: {
+          loaded: true,
+          generatedAtUtc: '2026-05-21T12:34:56Z',
+          isStale: false,
+          ageDays: 7,
+          loadError: null,
+        },
+        checkedAt: '2026-06-20T10:00:00.000Z',
+      },
+    },
+  })
+  @ApiResponse({ status: 403, description: 'Forbidden — admin role required.' })
+  async getStellarDiagnostics() {
+    return this.stellarDiagnosticsService.getDiagnostics();
   }
 
   // Operator anchor & tip lookup (Issue #778)
@@ -618,3 +702,4 @@ export class AdminController {
     return result;
   }
 }
+

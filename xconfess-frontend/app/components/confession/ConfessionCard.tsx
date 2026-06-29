@@ -66,7 +66,11 @@ export const ConfessionCard = memo(({ confession }: Props) => {
   };
 
   return (
-    <article className="luxury-panel rounded-[30px] p-6 transition-all duration-300 hover:-translate-y-0.5 hover:bg-[var(--surface-strong)]">
+    <article
+      tabIndex={0}
+      data-shortcut-confession={confession.id}
+      className="luxury-panel rounded-[30px] p-6 transition-all duration-300 hover:-translate-y-0.5 hover:bg-[var(--surface-strong)]"
+    >
       <div className="mb-5 flex items-center justify-between border-b border-[var(--border)] pb-4">
         <div className="flex items-center gap-3">
           {confession.author?.avatar ? (

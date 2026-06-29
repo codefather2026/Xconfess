@@ -10,6 +10,14 @@ import {
   HttpStatus,
   UseGuards,
 } from '@nestjs/common';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiParam,
+  ApiQuery,
+  ApiResponse,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AdminGuard } from '../auth/admin.guard';
 import { AiModerationService, ModerationStatus } from './ai-moderation.service';
@@ -29,34 +37,21 @@ class UpdateThresholdsDto {
   mediumThreshold!: number;
 }
 
-/**
- * Admin-only moderation controller
- * All endpoints require JWT authentication and admin role
- *
- * Protected endpoints:
- * - GET /admin/moderation/pending - Get pending reviews
- * - POST /admin/moderation/review/:id - Review moderation item
- * - GET /admin/moderation/stats - Get moderation statistics
- * - GET /admin/moderation/accuracy - Get accuracy metrics
- * - GET /admin/moderation/config - Get configuration
- * - POST /admin/moderation/config/thresholds - Update thresholds
- * - POST /admin/moderation/test - Test moderation
- * - GET /admin/moderation/confession/:confessionId - Get confession logs
- * - GET /admin/moderation/user/:userId - Get user logs
- */
+@ApiTags('Admin - Moderation')
+@ApiBearerAuth()
 @Controller('admin/moderation')
+@UseGuards(JwtAuthGuard, AdminGuard)
 export class ModerationController {
   constructor(
     private readonly aiModerationService: AiModerationService,
     private readonly moderationRepoService: ModerationRepositoryService,
   ) {}
 
-  /**
-   * Get pending moderation reviews (Admin only)
-   * Requires: JwtAuthGuard + AdminGuard
-   */
-  @UseGuards(JwtAuthGuard, AdminGuard)
   @Get('pending')
+  @ApiOperation({ summary: 'Get pending moderation reviews (Admin only)' })
+  @ApiQuery({ name: 'limit', required: false, example: 50 })
+  @ApiQuery({ name: 'offset', required: false, example: 0 })
+  @ApiResponse({ status: 200, description: 'Pending moderation reviews.' })
   async getPendingReviews(
     @Query('limit') limit = 50,
     @Query('offset') offset = 0,
@@ -67,13 +62,11 @@ export class ModerationController {
     );
   }
 
-  /**
-   * Review a moderation item (Admin only)
-   * Requires: JwtAuthGuard + AdminGuard
-   */
-  @UseGuards(JwtAuthGuard, AdminGuard)
   @Post('review/:id')
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Review a moderation item (Admin only)' })
+  @ApiParam({ name: 'id', description: 'Moderation item ID' })
+  @ApiResponse({ status: 200, description: 'Moderation reviewed.' })
   async reviewModeration(
     @Param('id') id: string,
     @Body() dto: ReviewModerationDto,
@@ -86,12 +79,11 @@ export class ModerationController {
     );
   }
 
-  /**
-   * Get moderation statistics (Admin only)
-   * Requires: JwtAuthGuard + AdminGuard
-   */
-  @UseGuards(JwtAuthGuard, AdminGuard)
   @Get('stats')
+  @ApiOperation({ summary: 'Get moderation statistics (Admin only)' })
+  @ApiQuery({ name: 'startDate', required: false, example: '2026-04-01' })
+  @ApiQuery({ name: 'endDate', required: false, example: '2026-04-30' })
+  @ApiResponse({ status: 200, description: 'Moderation statistics.' })
   async getStats(
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
@@ -101,33 +93,24 @@ export class ModerationController {
     return await this.moderationRepoService.getModerationStats(start, end);
   }
 
-  /**
-   * Get accuracy metrics (Admin only)
-   * Requires: JwtAuthGuard + AdminGuard
-   */
-  @UseGuards(JwtAuthGuard, AdminGuard)
   @Get('accuracy')
+  @ApiOperation({ summary: 'Get accuracy metrics (Admin only)' })
+  @ApiResponse({ status: 200, description: 'Accuracy metrics.' })
   async getAccuracyMetrics() {
     return await this.moderationRepoService.getAccuracyMetrics();
   }
 
-  /**
-   * Get moderation configuration (Admin only)
-   * Requires: JwtAuthGuard + AdminGuard
-   */
-  @UseGuards(JwtAuthGuard, AdminGuard)
   @Get('config')
+  @ApiOperation({ summary: 'Get moderation configuration (Admin only)' })
+  @ApiResponse({ status: 200, description: 'Current moderation config.' })
   getConfiguration() {
     return this.aiModerationService.getConfiguration();
   }
 
-  /**
-   * Update moderation thresholds (Admin only)
-   * Requires: JwtAuthGuard + AdminGuard
-   */
-  @UseGuards(JwtAuthGuard, AdminGuard)
   @Post('config/thresholds')
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Update moderation thresholds (Admin only)' })
+  @ApiResponse({ status: 200, description: 'Thresholds updated.' })
   updateThresholds(@Body() dto: UpdateThresholdsDto) {
     this.aiModerationService.updateThresholds(
       dto.highThreshold,
@@ -136,13 +119,10 @@ export class ModerationController {
     return { message: 'Thresholds updated successfully' };
   }
 
-  /**
-   * Test moderation content (Admin only)
-   * Requires: JwtAuthGuard + AdminGuard
-   */
-  @UseGuards(JwtAuthGuard, AdminGuard)
   @Post('test')
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Test moderation content (Admin only)' })
+  @ApiResponse({ status: 200, description: 'Moderation test completed.' })
   async testModeration(@Body() dto: TestModerationDto) {
     const result = await this.aiModerationService.moderateContent(dto.content);
     return {
@@ -151,22 +131,19 @@ export class ModerationController {
     };
   }
 
-  /**
-   * Get moderation logs for a confession (Admin only)
-   * Requires: JwtAuthGuard + AdminGuard
-   */
-  @UseGuards(JwtAuthGuard, AdminGuard)
   @Get('confession/:confessionId')
+  @ApiOperation({ summary: 'Get moderation logs for a confession (Admin only)' })
+  @ApiParam({ name: 'confessionId', description: 'Confession UUID' })
+  @ApiResponse({ status: 200, description: 'Moderation logs.' })
   async getConfessionLogs(@Param('confessionId') confessionId: string) {
     return await this.moderationRepoService.getLogsByConfession(confessionId);
   }
 
-  /**
-   * Get moderation logs for a user (Admin only)
-   * Requires: JwtAuthGuard + AdminGuard
-   */
-  @UseGuards(JwtAuthGuard, AdminGuard)
   @Get('user/:userId')
+  @ApiOperation({ summary: 'Get moderation logs for a user (Admin only)' })
+  @ApiParam({ name: 'userId', description: 'User UUID' })
+  @ApiQuery({ name: 'limit', required: false, example: 100 })
+  @ApiResponse({ status: 200, description: 'User moderation logs.' })
   async getUserLogs(
     @Param('userId') userId: string,
     @Query('limit') limit = 100,

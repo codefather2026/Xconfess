@@ -1,13 +1,16 @@
 import {
   Controller,
+  Body,
   Get,
   Post,
   Param,
   Delete,
   Query,
   Req,
+  Res,
   UseGuards,
 } from '@nestjs/common';
+import { Response } from 'express';
 import { JobManagementService } from './services/job-management.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AdminGuard } from '../auth/admin.guard';
@@ -50,12 +53,16 @@ export class DlqAdminController {
   }
 
   @Post(':id/retry')
-  async retry(@Param('id') id: string, @Req() req: any) {
+  async retry(
+    @Param('id') id: string,
+    @Body('reason') reason: string | undefined,
+    @Req() req: any,
+  ) {
     const actorId = String(req.user?.id);
     return this.jobManagementService.replayDlqJob(
       id,
       actorId,
-      undefined,
+      reason,
       this.buildAuditContext(req),
     );
   }
@@ -68,6 +75,41 @@ export class DlqAdminController {
       options,
       this.buildAuditContext(req),
     );
+  }
+
+  @Post('replay')
+  async replaySelected(
+    @Body() body: { jobIds: string[] },
+    @Req() req: any,
+  ) {
+    const actorId = String(req.user?.id);
+    return this.jobManagementService.replayDlqJobsBulk(
+      actorId,
+      { jobIds: body.jobIds },
+      this.buildAuditContext(req),
+    );
+  }
+
+  @Get('export-csv')
+  async exportCsv(
+    @Req() req: any,
+    @Res() res: Response,
+    @Query('failedAfter') failedAfter?: string,
+    @Query('failedBefore') failedBefore?: string,
+    @Query('search') search?: string,
+  ) {
+    const csv = await this.jobManagementService.exportDlqCsv({
+      failedAfter,
+      failedBefore,
+      search,
+    });
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="dlq-jobs-${Date.now()}.csv"`,
+    );
+    res.send(csv);
   }
 
   @Delete(':id')

@@ -29,6 +29,8 @@ export const envValidationSchema = Joi.object({
   DB_NAME: Joi.string().required().messages({
     'any.required': 'DB_NAME is required – set the PostgreSQL database name.',
   }),
+  DB_READ_HOST: Joi.string().optional(),
+  DB_READ_PORT: Joi.number().port().optional(),
   TYPEORM_SYNCHRONIZE: Joi.string()
     .valid('true', 'false', '1', '0', 'yes', 'no', 'on', 'off')
     .optional(),
@@ -134,4 +136,7 @@ export const envValidationSchema = Joi.object({
   DLQ_AUTO_REPLAY_INTERVAL_MS: Joi.number().default(1800000), // 30 min
   DLQ_AUTO_REPLAY_LOOKBACK_MINUTES: Joi.number().default(15),
   DLQ_AUTO_REPLAY_MAX_JOBS_PER_RUN: Joi.number().default(50),
+
+  // ── Redis queue health ──────────────────────────────────────────────
+  REDIS_QUEUE_LATENCY_THRESHOLD_MS: Joi.number().default(250),
 }).options({ allowUnknown: true, abortEarly: false });

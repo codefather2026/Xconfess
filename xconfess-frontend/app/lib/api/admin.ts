@@ -3,6 +3,7 @@ import type {
   FailedJobsResponse,
   FailedJobsFilter,
   ReplayJobResponse,
+  BulkReplayResponse,
 } from '../types/notification-jobs';
 
 export interface Report {
@@ -101,7 +102,24 @@ export interface AdminObservabilityResponse {
   generatedAt: string;
 }
 
+export interface ReportStats {
+  pendingCount: number;
+  oldestUnresolvedAge: number | null;
+  resolvedTodayCount: number;
+}
+
+export interface SystemHealthResponse {
+  status: 'ok' | 'error';
+  details?: Record<string, { status: string; [key: string]: any }>;
+  error?: string;
+}
+
 export const adminApi = {
+  getSystemHealth: async (): Promise<SystemHealthResponse> => {
+    const response = await apiClient.get('/api/health/ready');
+    return response.data;
+  },
+
   // Reports
   getReports: async (params?: {
     status?: string;
@@ -140,6 +158,12 @@ export const adminApi = {
       notes,
     });
     return response.data;
+  },
+
+  // Report stats
+  getReportStats: async () => {
+    const response = await apiClient.get('/api/admin/reports/stats');
+    return response.data as ReportStats;
   },
 
   // Confessions
@@ -238,14 +262,43 @@ export const adminApi = {
       params.failedBefore = new Date(filter.endDate).toISOString();
     }
 
-    const response = await apiClient.get('/admin/notifications/dlq', { params });
+    const response = await apiClient.get('/api/admin/dlq', { params });
     return response.data;
   },
 
   replayFailedNotificationJob: async (jobId: string, reason?: string): Promise<ReplayJobResponse> => {
-    const response = await apiClient.post(`/admin/notifications/dlq/${jobId}/replay`, {
+    const response = await apiClient.post(`/api/admin/dlq/${jobId}/retry`, {
       reason,
     });
     return response.data;
+  },
+
+  bulkReplayJobs: async (jobIds: string[]): Promise<BulkReplayResponse> => {
+    const response = await apiClient.post('/api/admin/dlq/replay', { jobIds });
+    return response.data;
+  },
+
+  exportDlqCsv: async (filter?: FailedJobsFilter): Promise<void> => {
+    const params: Record<string, any> = {};
+    if (filter?.startDate) {
+      params.failedAfter = new Date(filter.startDate).toISOString();
+    }
+    if (filter?.endDate) {
+      params.failedBefore = new Date(filter.endDate).toISOString();
+    }
+
+    const response = await apiClient.get('/api/admin/dlq/export-csv', {
+      params,
+      responseType: 'blob',
+    });
+
+    const url = window.URL.createObjectURL(new Blob([response.data], { type: 'text/csv;charset=utf-8;' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `dlq-jobs-${Date.now()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
   },
 };
