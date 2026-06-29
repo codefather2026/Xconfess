@@ -12,6 +12,7 @@ import { ConfessionService } from './confession.service';
 import { AnonymousConfession } from './entities/confession.entity';
 import { Tag } from './entities/tag.entity';
 import { ConfessionTag } from './entities/confession-tag.entity';
+import { Category } from '../category/entities/category.entity';
 import { AnonymousConfessionRepository } from './repository/confession.repository';
 import { ConfessionViewCacheService } from './confession-view-cache.service';
 import { TagService } from './tag.service';
@@ -62,7 +63,7 @@ class MockRedis {
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([AnonymousConfession, Tag, ConfessionTag]),
+    TypeOrmModule.forFeature([AnonymousConfession, Tag, ConfessionTag, Category]),
 
     forwardRef(() => ReactionModule),
     ModerationModule,

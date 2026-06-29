@@ -15,6 +15,7 @@ import { AnonymousUser } from '../../user/entities/anonymous-user.entity';
 import { Gender } from '../dto/get-confessions.dto';
 import { Comment } from '../../comment/entities/comment.entity';
 import { ConfessionTag } from './confession-tag.entity';
+import { Category } from '../../category/entities/category.entity';
 
 @Entity('anonymous_confessions')
 @Unique(['stellarTxHash'])
@@ -136,6 +137,13 @@ export class AnonymousConfession {
 
   @Column({ name: 'publish_at', type: 'timestamp', nullable: true })
   publishAt: Date;
+
+  @Column({ name: 'category_id', type: 'uuid', nullable: true })
+  categoryId: string | null;
+
+  @ManyToOne(() => Category)
+  @JoinColumn({ name: 'category_id' })
+  category: Category;
 
   get content(): string {
     return this.message;

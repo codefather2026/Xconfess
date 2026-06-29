@@ -2,10 +2,13 @@
 
 import Link from "next/link";
 import { useState, useCallback, useRef } from "react";
-import { Menu, LogOut } from "lucide-react";
+import { Menu, LogOut, Bell } from "lucide-react";
 import { useAuth } from "../../lib/hooks/useAuth";
 import { ThemeToggle } from "../common/ThemeToggle";
 import Sidebar from "./Sidebar";
+import { useNotifications } from "@/app/lib/hooks/useNotifications";
+import { NotificationCenter } from "@/app/components/notifications/NotificationCenter";
+import { cn } from "@/app/lib/utils/cn";
 
 const navLinkClass =
   "rounded-full px-4 py-2.5 text-sm font-medium text-[var(--secondary)] transition-all duration-200 hover:bg-white/60 hover:text-[var(--foreground)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--primary)]";
@@ -13,7 +16,10 @@ const navLinkClass =
 export default function Header() {
   const { user, logout } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
+
+  const { unreadCount, isConnected } = useNotifications(user?.id || "");
 
   const closeMobileMenu = useCallback(() => {
     setMobileMenuOpen(false);
@@ -77,8 +83,31 @@ export default function Header() {
 
               <ThemeToggle />
 
+              <Link href="/messages" className={navLinkClass}>
+                Messages
+              </Link>
+
               {user && (
-                <div className="flex items-center space-x-4">
+                <div className="flex items-center gap-2">
+                  <div className="relative">
+                    <button
+                      onClick={() => setShowNotifications(!showNotifications)}
+                      className={cn(navLinkClass, "relative")}
+                      aria-label="Notifications"
+                    >
+                      <Bell size={18} />
+                      {unreadCount > 0 && (
+                        <span className="absolute -top-1 -right-1 inline-flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white">
+                          {unreadCount > 9 ? "9+" : unreadCount}
+                        </span>
+                      )}
+                    </button>
+                    {showNotifications && (
+                      <div className="absolute right-0 top-full mt-2 z-50">
+                        <NotificationCenter onClose={() => setShowNotifications(false)} />
+                      </div>
+                    )}
+                  </div>
                   <span
                     aria-label={`Logged in as ${user.username}`}
                     className="rounded-full border border-[var(--border)] bg-[var(--surface-muted)] px-4 py-2 text-sm text-[var(--secondary)]"

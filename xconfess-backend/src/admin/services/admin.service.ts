@@ -789,6 +789,47 @@ export class AdminService {
       where: { isDeleted: true },
     });
 
+    // Reactions today
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const reactionsTodayRow = await this.confessionRepository
+      .createQueryBuilder('confession')
+      .leftJoin('confession.reactions', 'reaction')
+      .select('COUNT(reaction.id)', 'count')
+      .where('reaction.createdAt >= :todayStart', { todayStart })
+      .getRawOne();
+    const reactionsToday = parseInt(reactionsTodayRow?.count || '0', 10);
+
+    // Active sessions (unique anonymous users in last 24h)
+    const last24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const activeSessions = await this.userAnonRepository
+      .createQueryBuilder('anon')
+      .where('anon.createdAt >= :last24h', { last24h })
+      .getCount();
+
+    // Top 10 most reacted confessions
+    const topReacted = await this.confessionRepository
+      .createQueryBuilder('confession')
+      .leftJoin('confession.reactions', 'reaction')
+      .where('confession.isDeleted = :isDeleted', { isDeleted: false })
+      .andWhere('confession.isHidden = :isHidden', { isHidden: false })
+      .groupBy('confession.id, confession.message, confession.created_at')
+      .orderBy('COUNT(reaction.id)', 'DESC')
+      .limit(10)
+      .select([
+        'confession.id',
+        'confession.message',
+        'confession.created_at',
+        'COUNT(reaction.id) as reactionCount',
+      ])
+      .getRawMany();
+
+    for (const item of topReacted) {
+      if (item.message) {
+        item.message = this.safeDecryptConfessionMessage(item.message);
+      }
+    }
+
     return {
       overview: {
         totalUsers,
@@ -798,6 +839,8 @@ export class AdminService {
         bannedUsers,
         hiddenConfessions,
         deletedConfessions,
+        reactionsToday,
+        activeSessions,
       },
       reports: {
         byStatus: reportsByStatus,
@@ -806,6 +849,7 @@ export class AdminService {
       trends: {
         confessionsOverTime,
       },
+      topReactedConfessions: topReacted,
       period: {
         start,
         end,

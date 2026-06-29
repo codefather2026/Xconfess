@@ -2,6 +2,7 @@
 
 import {
     NotificationFilter,
+    NotificationType,
 } from "@/app/types/notifications";
 import type { Notification } from "@/app/types/notifications";
 import { useState, useEffect, useCallback, useRef } from "react";
@@ -9,8 +10,10 @@ import { io, Socket } from "socket.io-client";
 import { notificationApi } from "@/app/lib/api/notification";
 import { useApiError } from "@/app/lib/hooks/useApiError";
 import { getWsUrl } from "@/app/lib/config";
+import { AUTH_TOKEN_KEY } from "@/app/lib/api/constants";
 
 const WS_URL = getWsUrl();
+const NOTIFICATIONS_NS = '/notifications';
 
 interface UseNotificationsReturn {
   notifications: Notification[];
@@ -131,9 +134,9 @@ export function useNotifications(userId: string): UseNotificationsReturn {
 
     // get auth token from our client or cookies - we'll just omit it if the socket relies on cookies
     // Or we keep AUTH_TOKEN_KEY usage ONLY for websocket
-    const token = localStorage.getItem("auth_token");
+    const token = localStorage.getItem(AUTH_TOKEN_KEY);
 
-    const socket = io(WS_URL, {
+    const socket = io(`${WS_URL}${NOTIFICATIONS_NS}`, {
       auth: { token },
       transports: ["websocket", "polling"],
       withCredentials: true,
@@ -167,6 +170,28 @@ export function useNotifications(userId: string): UseNotificationsReturn {
       // Add to notifications list
       setNotifications((prev) => [notification, ...prev]);
       setUnreadCount((prev) => prev + 1);
+
+      // Show toast for key events
+      const toastMessages: Record<string, { title: string }> = {
+        [NotificationType.REACTION]: "New reaction on your confession",
+        [NotificationType.COMMENT]: "New comment on your confession",
+        [NotificationType.TIP]: "You received a new tip!",
+        [NotificationType.COMMENT_REPLY]: "New reply to your comment",
+        [NotificationType.MENTION]: "You were mentioned",
+      };
+
+      const mapped = toastMessages[notification.type];
+      if (mapped && typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('show-toast', {
+            detail: {
+              message: mapped.title,
+              type: 'info',
+              duration: 4000,
+            },
+          }),
+        );
+      }
 
       // Play sound and show browser notification
       playNotificationSound();

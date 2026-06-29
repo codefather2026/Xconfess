@@ -28,6 +28,7 @@ import { Eye, EyeOff, Send, Loader2, CloudDownload } from "lucide-react";
 import { cn } from "@/app/lib/utils/cn";
 import apiClient from "@/app/lib/api/client";
 import { useGlobalToast } from "@/app/components/common/Toast";
+import { useQuery } from "@tanstack/react-query";
 
 interface EnhancedConfessionFormProps {
   onSubmit?: (data: ConfessionFormData & { stellarTxHash?: string }) => void;
@@ -94,6 +95,7 @@ export const EnhancedConfessionForm: React.FC<EnhancedConfessionFormProps> = ({
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [gender, setGender] = useState<Gender | undefined>();
+  const [categoryId, setCategoryId] = useState<string | undefined>(undefined);
   const [isPreviewMode, setIsPreviewMode] = useState(false);
   const [enableStellarAnchor, setEnableStellarAnchor] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -117,6 +119,14 @@ export const EnhancedConfessionForm: React.FC<EnhancedConfessionFormProps> = ({
   const { anchor } = useStellarWallet();
   const toast = useGlobalToast();
   const { drafts } = useDrafts();
+  const { data: categories = [] } = useQuery({
+    queryKey: ['categories'],
+    queryFn: async () => {
+      const res = await apiClient.get('/api/categories');
+      return res.data as Array<{ id: string; name: string; slug: string; color: string; isActive: boolean }>;
+    },
+    staleTime: 5 * 60 * 1000,
+  });
   const currentValidationErrors = validateConfessionForm({
     title,
     body,
@@ -129,6 +139,7 @@ export const EnhancedConfessionForm: React.FC<EnhancedConfessionFormProps> = ({
     setTitle("");
     setBody("");
     setGender(undefined);
+    setCategoryId(undefined);
     setEnableStellarAnchor(false);
     setErrors({});
     setSubmitError(null);
@@ -206,6 +217,7 @@ export const EnhancedConfessionForm: React.FC<EnhancedConfessionFormProps> = ({
     setTitle(draft.title || "");
     setBody(draft.body);
     setGender(draft.gender);
+    setCategoryId(draft.categoryId);
     setNewerCloudDraft(null);
     setTimeout(() => {
       textareaRef.current?.focus();
@@ -259,6 +271,7 @@ export const EnhancedConfessionForm: React.FC<EnhancedConfessionFormProps> = ({
         message: body,
         gender,
         stellarTxHash: txHash,
+        ...(categoryId ? { categoryId } : {}),
       });
 
       setSubmitSuccess(true);
@@ -277,6 +290,7 @@ export const EnhancedConfessionForm: React.FC<EnhancedConfessionFormProps> = ({
       setTitle("");
       setBody("");
       setGender(undefined);
+      setCategoryId(undefined);
       setEnableStellarAnchor(false);
       setErrors({});
       setSubmitError(null);
@@ -524,6 +538,55 @@ export const EnhancedConfessionForm: React.FC<EnhancedConfessionFormProps> = ({
               ))}
             </div>
           </div>
+
+          {categories.length > 0 && (
+            <div>
+              <label className="mb-3 block text-sm font-medium text-[var(--foreground)]">
+                Category <span className="text-[var(--secondary)]">(optional)</span>
+              </label>
+              <div className="flex flex-wrap gap-3">
+                <label
+                  key="none"
+                  className={cn(
+                    "cursor-pointer rounded-full border px-4 py-2 text-sm transition-colors",
+                    !categoryId
+                      ? "border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--foreground)]"
+                      : "border-[var(--border)] bg-[var(--surface-muted)] text-[var(--secondary)] hover:bg-[var(--surface-strong)]"
+                  )}
+                >
+                  <input
+                    type="radio"
+                    name="category"
+                    checked={!categoryId}
+                    onChange={() => setCategoryId(undefined)}
+                    className="sr-only"
+                  />
+                  None
+                </label>
+                {categories.filter((c) => c.isActive).map((cat) => (
+                  <label
+                    key={cat.id}
+                    className={cn(
+                      "cursor-pointer rounded-full border px-4 py-2 text-sm transition-colors",
+                      categoryId === cat.id
+                        ? "border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--foreground)]"
+                        : "border-[var(--border)] bg-[var(--surface-muted)] text-[var(--secondary)] hover:bg-[var(--surface-strong)]"
+                    )}
+                  >
+                    <input
+                      type="radio"
+                      name="category"
+                      checked={categoryId === cat.id}
+                      onChange={() => setCategoryId(cat.id)}
+                      className="sr-only"
+                    />
+                    <span className="mr-1.5 inline-block h-3 w-3 rounded-full" style={{ backgroundColor: cat.color }} />
+                    {cat.name}
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="rounded-[26px] border border-[var(--border)] bg-[var(--surface-muted)] p-4">
             <StellarAnchorToggle

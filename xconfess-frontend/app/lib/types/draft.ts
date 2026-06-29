@@ -10,6 +10,7 @@ export interface Draft {
   title?: string;
   body: string;
   gender?: Gender;
+  categoryId?: string;
   savedAt: number; // epoch ms, used for sort + "last saved" display
   characterCount: number;
   scheduledFor?: string;

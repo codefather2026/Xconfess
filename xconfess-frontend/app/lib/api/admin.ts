@@ -59,6 +59,37 @@ export interface User {
   updatedAt: string;
 }
 
+export interface Category {
+  id: string;
+  name: string;
+  slug: string;
+  icon: string;
+  color: string;
+  description?: string;
+  isActive: boolean;
+  confessionCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateCategoryInput {
+  name: string;
+  slug?: string;
+  icon?: string;
+  color?: string;
+  description?: string;
+  isActive?: boolean;
+}
+
+export interface UpdateCategoryInput {
+  name?: string;
+  slug?: string;
+  icon?: string;
+  color?: string;
+  description?: string;
+  isActive?: boolean;
+}
+
 export interface Analytics {
   overview: {
     totalUsers: number;
@@ -68,6 +99,8 @@ export interface Analytics {
     bannedUsers: number;
     hiddenConfessions: number;
     deletedConfessions: number;
+    reactionsToday: number;
+    activeSessions: number;
   };
   reports: {
     byStatus: Array<{ status: string; count: string }>;
@@ -76,6 +109,12 @@ export interface Analytics {
   trends: {
     confessionsOverTime: Array<{ date: string; count: string }>;
   };
+  topReactedConfessions: Array<{
+    id: string;
+    message: string;
+    created_at: string;
+    reactionCount: number;
+  }>;
   period: {
     start: string;
     end: string;
@@ -208,6 +247,34 @@ export const adminApi = {
 
   unbanUser: async (id: string) => {
     const response = await apiClient.patch(`/api/admin/users/${id}/unban`);
+    return response.data;
+  },
+
+  // Categories
+  getCategories: async (includeInactive = false) => {
+    const response = await apiClient.get('/api/admin/categories', {
+      params: { includeInactive: String(includeInactive) },
+    });
+    return response.data as Category[];
+  },
+
+  getCategory: async (id: string) => {
+    const response = await apiClient.get(`/api/admin/categories/${id}`);
+    return response.data as Category;
+  },
+
+  createCategory: async (input: CreateCategoryInput) => {
+    const response = await apiClient.post('/api/admin/categories', input);
+    return response.data as Category;
+  },
+
+  updateCategory: async (id: string, input: UpdateCategoryInput) => {
+    const response = await apiClient.patch(`/api/admin/categories/${id}`, input);
+    return response.data as Category;
+  },
+
+  deleteCategory: async (id: string) => {
+    const response = await apiClient.delete(`/api/admin/categories/${id}`);
     return response.data;
   },
 

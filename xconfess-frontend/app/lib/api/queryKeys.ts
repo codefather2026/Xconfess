@@ -77,6 +77,15 @@ export const queryKeys = {
       all: () => ["admin", "analytics"] as const,
     },
 
+    categories: {
+      // ["admin", "categories"]
+      all: () => ["admin", "categories"] as const,
+      list: (includeInactive?: boolean) =>
+        ["admin", "categories", "list", { includeInactive }] as const,
+      detail: (id: string) =>
+        ["admin", "categories", "detail", id] as const,
+    },
+
     observability: {
       all: () => ["admin", "observability"] as const,
       list: (params?: Record<string, unknown>) =>
