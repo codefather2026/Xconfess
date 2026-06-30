@@ -93,6 +93,13 @@ The example file points all URLs at `localhost:5000` (backend) and `localhost:30
 ```
 NEXT_PUBLIC_DEV_BYPASS_AUTH=true
 ```
+| Key | Purpose |
+|-----|---------|
+| `JWT_SECRET` | Signs auth tokens — use any long random string locally |
+| `APP_SECRET` | App-level HMAC secret — use any long random string locally |
+| `CONFESSION_ENCRYPTION_KEY` | 64-character hex string used to encrypt confession content |
+| `STELLAR_SERVER_SECRET` | Stellar keypair secret for on-chain operations (testnet only) |
+| `TIP_VERIFICATION_STALE_THRESHOLD_MINUTES` | SLA threshold (minutes) for marking pending tips as stale |
 
 ### 4. (Optional) Seed demo data
 

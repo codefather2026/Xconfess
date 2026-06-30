@@ -81,6 +81,15 @@ Operator checks for healthy flow:
   - Return canonical existing record where available.
   - Never double-credit tip totals.
 
+
+### Configuration Reference: SLA Thresholds
+The system identifies stuck transactions using `TIP_VERIFICATION_STALE_THRESHOLD_MINUTES`. 
+
+- **Default:** 30 minutes.
+- **Purpose:** Defines the duration after which a `pending` tip verification is escalated to `stale_pending` for operator visibility.
+- **Incident Triage:** If you receive alerts for stale tips, check this variable in your environment configuration. If your Stellar RPC/Horizon provider is experiencing known network-wide delays, you may need to temporarily increase this threshold to avoid false-positive escalations.
+
+
 ## Troubleshooting Playbooks
 
 ### Network Mismatch
