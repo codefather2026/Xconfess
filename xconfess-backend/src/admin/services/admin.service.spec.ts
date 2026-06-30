@@ -14,6 +14,7 @@ function createChainableQB(overrides: Partial<any> = {}) {
     andWhere: jest.fn().mockReturnThis(),
     orWhere: jest.fn().mockReturnThis(),
     orderBy: jest.fn().mockReturnThis(),
+    addOrderBy: jest.fn().mockReturnThis(),
     groupBy: jest.fn().mockReturnThis(),
     select: jest.fn().mockReturnThis(),
     addSelect: jest.fn().mockReturnThis(),
@@ -88,6 +89,10 @@ describe('AdminService', () => {
     getDiagnostics: jest.fn(),
   };
 
+  const lockoutService: any = {
+    clearLockout: jest.fn(),
+  };
+
   let service: AdminService;
 
   beforeEach(() => {
@@ -120,6 +125,7 @@ describe('AdminService', () => {
       eventEmitter,
       auditLogService,
       jobManagementService,
+      lockoutService,
     );
   });
 
@@ -383,6 +389,26 @@ describe('AdminService', () => {
     userRepository.findOne.mockResolvedValue(user2);
     const unbanned = await service.unbanUser(10, 1, {} as any);
     expect(unbanned.is_active).toBe(true);
+  });
+
+  it('updateUserRole changes role and logs audit action', async () => {
+    const user: any = { id: 10, role: 'user', is_active: true };
+    userRepository.findOne.mockResolvedValue(user);
+    userRepository.save.mockImplementation(async (u: any) => u);
+
+    const updated = await service.updateUserRole(10, 'moderator' as any, 1, {} as any);
+
+    expect(updated.role).toBe('moderator');
+    expect(moderationService.logAction).toHaveBeenCalledWith(
+      1,
+      AuditActionType.MODERATION_OVERRIDE,
+      'user',
+      '10',
+      { previousRole: 'user', role: 'moderator' },
+      'Role changed from user to moderator',
+      expect.anything(),
+      expect.anything(),
+    );
   });
 
   it('getUserHistory returns user + confessions + reports', async () => {

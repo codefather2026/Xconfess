@@ -5,6 +5,7 @@ import { useState, useCallback, useRef } from "react";
 import { Menu, LogOut } from "lucide-react";
 import { useAuth } from "../../lib/hooks/useAuth";
 import { ThemeToggle } from "../common/ThemeToggle";
+import { WalletButton } from "@/components/wallet/WalletButton";
 import Sidebar from "./Sidebar";
 
 const navLinkClass =
@@ -75,6 +76,7 @@ export default function Header() {
                 className="mx-2 h-8 w-px bg-[var(--border)]"
               />
 
+              <WalletButton className="hidden md:inline-flex" />
               <ThemeToggle />
 
               {user && (
@@ -97,6 +99,7 @@ export default function Header() {
             </div>
 
             <div className="flex items-center gap-4 md:hidden">
+              <WalletButton className="md:hidden" />
               <ThemeToggle />
               <button
                 ref={menuButtonRef}

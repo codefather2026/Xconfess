@@ -90,7 +90,7 @@ export interface GetConfessionByIdResult {
   isAnchored?: boolean;
   stellarTxHash?: string | null;
   anchorStatus?: "confirmed" | "pending" | "not_anchored";
-  author?: { id: string; username?: string; avatar?: string | null };
+  author?: { id: string; username?: string; avatar?: string | null; stellarAddress?: string };
 }
 
 export type GetConfessionByIdResponse =

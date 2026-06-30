@@ -35,6 +35,7 @@ export class AuthService {
     private emailService: EmailService,
     private passwordResetService: PasswordResetService,
     private anonymousUserService: AnonymousUserService,
+    private lockoutService: LockoutService,
   ) {}
 
   async validateUser(
@@ -330,5 +331,4 @@ export class AuthService {
     }
   }
 }
-
 

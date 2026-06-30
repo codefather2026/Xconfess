@@ -784,6 +784,7 @@ export class AuditLogService {
    */
   async findAll(options: {
     userId?: string | number;
+    actor?: string;
     actorId?: string;
     actorType?: string;
     actionType?: AuditActionType;
@@ -793,6 +794,9 @@ export class AuditLogService {
     exportId?: string;
     templateKey?: string;
     templateVersion?: string;
+    search?: string;
+    sortBy?: 'createdAt' | 'actor' | 'action' | 'target';
+    sortOrder?: 'ASC' | 'DESC';
     startDate?: Date;
     endDate?: Date;
     limit?: number;
@@ -816,6 +820,29 @@ export class AuditLogService {
         query.andWhere('audit_log.admin_id = :userId', {
           userId: normalizedUserId,
         });
+      }
+
+      if (options.actor) {
+        const actor = options.actor.trim();
+        if (actor) {
+          const normalizedActorId = this.toNullableUserId(actor);
+          query.andWhere(
+            `(${[
+              'admin.username ILIKE :actorLike',
+              "audit_log.metadata->>'actorLabel' ILIKE :actorLike",
+              "audit_log.metadata->>'actorId' ILIKE :actorLike",
+              normalizedActorId === null
+                ? null
+                : 'audit_log.admin_id = :actorId',
+            ]
+              .filter(Boolean)
+              .join(' OR ')})`,
+            {
+              actorLike: `%${actor}%`,
+              actorId: normalizedActorId,
+            },
+          );
+        }
       }
 
       if (options.actorId) {
@@ -886,6 +913,24 @@ export class AuditLogService {
         );
       }
 
+      if (options.search) {
+        const search = options.search.trim();
+        if (search) {
+          query.andWhere(
+            `(${[
+              'audit_log.action::text ILIKE :search',
+              'audit_log.entity_type ILIKE :search',
+              'audit_log.entity_id ILIKE :search',
+              'audit_log.notes ILIKE :search',
+              'audit_log.request_id ILIKE :search',
+              'admin.username ILIKE :search',
+              'audit_log.metadata::text ILIKE :search',
+            ].join(' OR ')})`,
+            { search: `%${search}%` },
+          );
+        }
+      }
+
       if (options.startDate) {
         query.andWhere('audit_log.createdAt >= :startDate', {
           startDate: options.startDate,
@@ -898,7 +943,22 @@ export class AuditLogService {
         });
       }
 
-      query.orderBy('audit_log.createdAt', 'DESC');
+      const sortOrder = options.sortOrder === 'ASC' ? 'ASC' : 'DESC';
+      const sortColumn =
+        options.sortBy === 'actor'
+          ? 'admin.username'
+          : options.sortBy === 'action'
+            ? 'audit_log.action'
+            : options.sortBy === 'target'
+              ? 'audit_log.entity_type'
+              : 'audit_log.createdAt';
+      query.orderBy(sortColumn, sortOrder);
+      if (options.sortBy === 'target') {
+        query.addOrderBy('audit_log.entity_id', sortOrder);
+      }
+      if (options.sortBy && options.sortBy !== 'createdAt') {
+        query.addOrderBy('audit_log.createdAt', 'DESC');
+      }
       query.limit(options.limit || 100);
       query.offset(options.offset || 0);
 

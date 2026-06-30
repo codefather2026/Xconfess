@@ -1,5 +1,6 @@
 import { ImageResponse } from 'next/og';
 import { NextRequest } from 'next/server';
+import React from 'react';
 
 export const runtime = 'edge';
 
@@ -10,9 +11,10 @@ export async function GET(request: NextRequest) {
     const truncated = text.length > 150 ? text.substring(0, 147) + '...' : text;
 
     return new ImageResponse(
-      (
-        <div
-          style={{
+      React.createElement(
+        'div',
+        {
+          style: {
             background: 'linear-gradient(to bottom right, #1e293b, #0f172a)',
             width: '100%',
             height: '100%',
@@ -21,39 +23,44 @@ export async function GET(request: NextRequest) {
             alignItems: 'center',
             justifyContent: 'center',
             padding: '60px',
-          }}
-        >
-          <div
-            style={{
+          },
+        },
+        React.createElement(
+          'div',
+          {
+            style: {
               background: 'white',
               borderRadius: '20px',
               padding: '40px',
               maxWidth: '900px',
               display: 'flex',
               flexDirection: 'column',
-            }}
-          >
-            <div
-              style={{
+            },
+          },
+          React.createElement(
+            'div',
+            {
+              style: {
                 fontSize: 32,
                 fontWeight: 'bold',
                 color: '#1e293b',
                 marginBottom: '20px',
-              }}
-            >
-              XConfess
-            </div>
-            <div
-              style={{
+              },
+            },
+            'XConfess',
+          ),
+          React.createElement(
+            'div',
+            {
+              style: {
                 fontSize: 24,
                 color: '#475569',
                 lineHeight: 1.5,
-              }}
-            >
-              {truncated}
-            </div>
-          </div>
-        </div>
+              },
+            },
+            truncated,
+          ),
+        ),
       ),
       {
         width: 1200,

@@ -64,6 +64,15 @@ export class AnonymousConfession {
   @Column({ default: false })
   isDeleted: boolean;
 
+   ─── Migration tracking ──────────────────────────────────────────────────
+  @Column({
+    type: 'varchar',
+    length: 16,
+    default: 'pending',
+    name: 'migration_status',
+  })
+  @Index()
+  migrationStatus: MigrationStatus;
   @Column({ name: 'deleted_at', type: 'timestamp', nullable: true })
   deletedAt: Date | null;
 
@@ -135,7 +144,7 @@ export class AnonymousConfession {
   status: string; // 'draft', 'scheduled', 'published'
 
   @Column({ name: 'publish_at', type: 'timestamp', nullable: true })
-  publishAt: Date;
+  publishAt: Date | null;
 
   get content(): string {
     return this.message;

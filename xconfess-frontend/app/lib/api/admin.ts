@@ -35,7 +35,7 @@ export interface Report {
 
 export interface AuditLog {
   id: string;
-  adminId: number;
+  adminId: number | null;
   admin?: {
     id: number;
     username: string;
@@ -47,16 +47,41 @@ export interface AuditLog {
   notes: string | null;
   ipAddress: string | null;
   userAgent: string | null;
+  requestId: string | null;
   createdAt: string;
 }
+
+export type AdminUserRole = 'user' | 'moderator' | 'admin';
 
 export interface User {
   id: number;
   username: string;
+  role: AdminUserRole;
   isAdmin: boolean;
   is_active: boolean;
+  confessionCount?: number;
+  reportsReceived?: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface UserHistoryResponse {
+  user: User;
+  summary?: {
+    confessionCount: number;
+    reportsFiled: number;
+    reportsReceived: number;
+  };
+  confessions: Array<Record<string, any>>;
+  reports: Array<Record<string, any>>;
+  activityTimeline?: Array<{
+    id: string;
+    type: string;
+    label: string;
+    createdAt: string;
+    summary?: string;
+  }>;
+  note?: string;
 }
 
 export interface Analytics {
@@ -187,21 +212,35 @@ export const adminApi = {
   },
 
   // Users
-  searchUsers: async (query: string, limit = 50, offset = 0) => {
+  searchUsers: async (
+    query: string,
+    limit = 50,
+    offset = 0,
+    sortBy: 'createdAt' | 'username' | 'role' | 'status' = 'createdAt',
+    sortOrder: 'ASC' | 'DESC' = 'DESC',
+  ) => {
     const response = await apiClient.get('/api/admin/users/search', {
-      params: { q: query, limit, offset },
+      params: { q: query || undefined, limit, offset, sortBy, sortOrder },
     });
     return response.data;
   },
 
-  getUserHistory: async (id: string) => {
+  getUserHistory: async (id: string): Promise<UserHistoryResponse> => {
     const response = await apiClient.get(`/api/admin/users/${id}/history`);
     return response.data;
   },
 
-  banUser: async (id: string, reason?: string) => {
+  updateUserRole: async (id: string, role: AdminUserRole) => {
+    const response = await apiClient.patch(`/api/admin/users/${id}/role`, {
+      role,
+    });
+    return response.data;
+  },
+
+  banUser: async (id: string, reason?: string, durationDays?: number | null) => {
     const response = await apiClient.patch(`/api/admin/users/${id}/ban`, {
       reason,
+      durationDays,
     });
     return response.data;
   },
@@ -233,6 +272,10 @@ export const adminApi = {
     entityType?: string;
     entityId?: string;
     requestId?: string;
+    actor?: string;
+    search?: string;
+    sortBy?: 'createdAt' | 'actor' | 'action' | 'target';
+    sortOrder?: 'ASC' | 'DESC';
     startDate?: string;
     endDate?: string;
     limit?: number;

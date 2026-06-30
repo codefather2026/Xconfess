@@ -1,4 +1,4 @@
-﻿import {
+import {
   Controller,
   Get,
   Patch,
@@ -28,11 +28,13 @@ import { ModerationService } from './services/moderation.service';
 import { ModerationTemplateService } from '../comment/moderation-template.service';
 import { ResolveReportDto } from './dto/resolve-report.dto';
 import { BanUserDto } from './dto/ban-user.dto';
+import { UpdateUserRoleDto } from './dto/update-user-role.dto';
 import { BulkResolveDto } from './dto/bulk-resolve.dto';
 import { ReportStatus, ReportType } from './entities/report.entity';
 import { AuditActionType } from '../audit-log/audit-log.entity';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { TemplateCategory } from '../comment/entities/moderation-note-template.entity';
+import { UserRole } from '../user/entities/user.entity';
 import { Request } from 'express';
 import { GetUser } from '../auth/get-user.decorator';
 import { RequestUser } from '../auth/interfaces/jwt-payload.interface';
@@ -233,7 +235,7 @@ export class AdminController {
   @ApiBody({
     schema: {
       example: {
-        resolutionNotes: 'Content removed â€” violates community guidelines.',
+        resolutionNotes: 'Content removed — violates community guidelines.',
         templateId: 3,
       },
     },
@@ -280,7 +282,7 @@ export class AdminController {
     schema: {
       example: {
         reportIds: ['abc-123', 'def-456'],
-        notes: 'Batch resolution â€” content removed.',
+        notes: 'Batch resolution — content removed.',
       },
     },
   })
@@ -398,7 +400,6 @@ export class AdminController {
     return this.adminService.getUserHistory(parseInt(id, 10));
   }
 
-  
   @Post('users/unlock-account')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Unlock a locked account by email' })
@@ -406,13 +407,38 @@ export class AdminController {
   @ApiResponse({ status: 200, description: 'Account unlocked.' })
   async unlockAccount(@Body('email') email: string) {
     await this.adminService.unlockAccount(email);
-    return { message: Account unlocked for \ };
+    return { message: `Account unlocked for ${email}` };
   }
+
+  @Patch('users/:id/role')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Change a user role' })
+  @ApiParam({ name: 'id', description: 'User numeric ID' })
+  @ApiBody({ schema: { example: { role: UserRole.MODERATOR } } })
+  @ApiResponse({ status: 200, description: 'User role updated.' })
+  async updateUserRole(
+    @Param('id') id: string,
+    @Body() dto: UpdateUserRoleDto,
+    @GetUser('id') adminId: number,
+    @Req() req: AuthedRequest,
+  ) {
+    return this.adminService.updateUserRole(
+      parseInt(id, 10),
+      dto.role,
+      adminId,
+      req,
+    );
+  }
+
   @Patch('users/:id/ban')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Ban a user account' })
   @ApiParam({ name: 'id', description: 'User numeric ID' })
-  @ApiBody({ schema: { example: { reason: 'Repeated policy violations.' } } })
+  @ApiBody({
+    schema: {
+      example: { reason: 'Repeated policy violations.', durationDays: 30 },
+    },
+  })
   @ApiResponse({ status: 200, description: 'User banned.' })
   async banUser(
     @Param('id') id: string,
@@ -425,6 +451,7 @@ export class AdminController {
       adminId,
       dto.reason || null,
       req,
+      dto.durationDays ?? null,
     );
   }
 
@@ -568,6 +595,11 @@ export class AdminController {
     description: 'Filter by admin user ID',
   })
   @ApiQuery({
+    name: 'actor',
+    required: false,
+    description: 'Filter by actor username, label, or ID',
+  })
+  @ApiQuery({
     name: 'action',
     required: false,
     description: 'Filter by action type',
@@ -577,6 +609,17 @@ export class AdminController {
     required: false,
     description: 'Filter by entity type (e.g. confession, user)',
   })
+  @ApiQuery({
+    name: 'search',
+    required: false,
+    description: 'Full-text keyword search across audit entries',
+  })
+  @ApiQuery({
+    name: 'sortBy',
+    required: false,
+    enum: ['createdAt', 'actor', 'action', 'target'],
+  })
+  @ApiQuery({ name: 'sortOrder', required: false, enum: ['ASC', 'DESC'] })
   @ApiQuery({ name: 'limit', required: false, type: Number, example: 100 })
   @ApiQuery({ name: 'offset', required: false, type: Number, example: 0 })
   @ApiResponse({
@@ -600,10 +643,14 @@ export class AdminController {
   })
   async getAuditLogs(
     @Query('adminId') adminId?: string,
+    @Query('actor') actor?: string,
     @Query('action') action?: string,
     @Query('entityType') entityType?: string,
     @Query('entityId') entityId?: string,
     @Query('requestId') requestId?: string,
+    @Query('search') search?: string,
+    @Query('sortBy') sortBy?: 'createdAt' | 'actor' | 'action' | 'target',
+    @Query('sortOrder') sortOrder?: 'ASC' | 'DESC',
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
     @Query('limit') limit?: string,
@@ -611,10 +658,14 @@ export class AdminController {
   ) {
     const result = await this.auditLogService.findAll({
       userId: adminId,
+      actor,
       actionType: parseAuditAction(action),
       entityType,
       entityId,
       requestId,
+      search,
+      sortBy,
+      sortOrder,
       startDate: startDate ? new Date(startDate) : undefined,
       endDate: endDate ? new Date(endDate) : undefined,
       limit: parseInt(limit || '100', 10),
@@ -702,4 +753,3 @@ export class AdminController {
     return result;
   }
 }
-

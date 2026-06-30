@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { FeatureFlag } from './entities/feature-flag.entity';
@@ -29,7 +29,11 @@ export class FeatureFlagsService {
 
   async update(name: string, dto: UpdateFeatureFlagDto): Promise<FeatureFlag> {
     await this.featureFlagRepository.update({ name }, dto);
-    return this.findOne(name);
+    const updated = await this.findOne(name);
+    if (!updated) {
+      throw new NotFoundException(`Feature flag ${name} not found`);
+    }
+    return updated;
   }
 
   async delete(name: string): Promise<void> {
