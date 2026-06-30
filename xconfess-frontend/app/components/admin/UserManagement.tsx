@@ -1,249 +1,365 @@
 'use client';
 
-import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { adminApi, User } from '@/app/lib/api/admin';
+import { useMemo, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  Ban,
+  ChevronLeft,
+  ChevronRight,
+  Eye,
+  RotateCcw,
+  Search,
+  Shield,
+  UserCog,
+} from 'lucide-react';
+import { adminApi, AdminUserRole, User } from '@/app/lib/api/admin';
 import { queryKeys } from '@/app/lib/api/queryKeys';
-import { useAdminConfirmation } from '@/app/components/admin/useAdminConfirmation';
 import { Button } from '@/app/components/ui/button';
+
+const roles: AdminUserRole[] = ['user', 'moderator', 'admin'];
+const limit = 20;
+
+type UserSortField = 'createdAt' | 'username' | 'role' | 'status';
+type SortOrder = 'ASC' | 'DESC';
+
+function displayRole(user: User): AdminUserRole {
+  return user.role || (user.isAdmin ? 'admin' : 'user');
+}
 
 export default function UserManagement() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [banTarget, setBanTarget] = useState<User | null>(null);
+  const [banReason, setBanReason] = useState('');
+  const [banDuration, setBanDuration] = useState('');
+  const [sortBy, setSortBy] = useState<UserSortField>('createdAt');
+  const [sortOrder, setSortOrder] = useState<SortOrder>('DESC');
   const [page, setPage] = useState(1);
-  const limit = 20;
 
   const queryClient = useQueryClient();
-  const { openConfirmation, confirmDialog } = useAdminConfirmation();
+  const filters = useMemo(
+    () => ({ query: searchQuery, page, sortBy, sortOrder }),
+    [searchQuery, page, sortBy, sortOrder],
+  );
 
-  const { data, isLoading } = useQuery({
-    queryKey: queryKeys.admin.users.search(searchQuery, page),
-    queryFn: () => adminApi.searchUsers(searchQuery, limit, (page - 1) * limit),
-    enabled: searchQuery.length > 0,
+  const { data, isLoading, isFetching } = useQuery({
+    queryKey: queryKeys.admin.users.search(JSON.stringify(filters), page),
+    queryFn: () =>
+      adminApi.searchUsers(
+        searchQuery.trim(),
+        limit,
+        (page - 1) * limit,
+        sortBy,
+        sortOrder,
+      ),
+  });
+
+  const invalidateUsers = () => {
+    queryClient.invalidateQueries({ queryKey: queryKeys.admin.users.all() });
+    if (selectedUser) {
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.admin.users.history(selectedUser.id.toString()),
+      });
+    }
+  };
+
+  const roleMutation = useMutation({
+    mutationFn: ({ id, role }: { id: string; role: AdminUserRole }) =>
+      adminApi.updateUserRole(id, role),
+    onSuccess: (updated: User) => {
+      invalidateUsers();
+      setSelectedUser((current) =>
+        current && current.id === updated.id ? { ...current, ...updated } : current,
+      );
+    },
   });
 
   const banMutation = useMutation({
-    mutationFn: ({ id, reason }: { id: string; reason?: string }) =>
-      adminApi.banUser(id, reason),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.admin.users.all() });
-      setSelectedUser(null);
+    mutationFn: ({
+      id,
+      reason,
+      durationDays,
+    }: {
+      id: string;
+      reason?: string;
+      durationDays?: number | null;
+    }) => adminApi.banUser(id, reason, durationDays),
+    onSuccess: (updated: User) => {
+      invalidateUsers();
+      setBanTarget(null);
+      setBanReason('');
+      setBanDuration('');
+      setSelectedUser((current) =>
+        current && current.id === updated.id ? { ...current, ...updated } : current,
+      );
     },
   });
 
   const unbanMutation = useMutation({
     mutationFn: (id: string) => adminApi.unbanUser(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.admin.users.all() });
-      setSelectedUser(null);
+    onSuccess: (updated: User) => {
+      invalidateUsers();
+      setSelectedUser((current) =>
+        current && current.id === updated.id ? { ...current, ...updated } : current,
+      );
     },
   });
 
-  const handleBan = (user: User) => {
-    openConfirmation({
-      title: `Ban ${user.username}?`,
-      description: 'This will block the user from signing in and using the platform.',
-      confirmLabel: 'Ban User',
-      variant: 'danger',
-      action: () => banMutation.mutateAsync({ id: user.id.toString() }),
-      successMessage: 'User banned.',
-      successOptions: {
-        action: {
-          label: 'Undo',
-          onClick: () => unbanMutation.mutate(user.id.toString()),
-        },
-      },
-      errorMessage: 'Failed to ban user.',
-    });
-  };
-
-  const handleUnban = (user: User) => {
-    openConfirmation({
-      title: `Unban ${user.username}?`,
-      description: 'This will restore the user account.',
-      confirmLabel: 'Unban User',
-      action: () => unbanMutation.mutateAsync(user.id.toString()),
-      successMessage: 'User unbanned.',
-      successOptions: {
-        action: {
-          label: 'Undo',
-          onClick: () => banMutation.mutate({ id: user.id.toString() }),
-        },
-      },
-      errorMessage: 'Failed to unban user.',
-    });
-  };
-
-  const users = data?.users || [];
+  const users: User[] = data?.users || [];
   const total = data?.total || 0;
-  const totalPages = Math.ceil(total / limit);
+  const totalPages = Math.max(1, Math.ceil(total / limit));
+
+  const changeSort = (field: UserSortField) => {
+    if (sortBy === field) {
+      setSortOrder((value) => (value === 'ASC' ? 'DESC' : 'ASC'));
+    } else {
+      setSortBy(field);
+      setSortOrder(field === 'username' ? 'ASC' : 'DESC');
+    }
+    setPage(1);
+  };
+
+  const submitBan = () => {
+    if (!banTarget) return;
+    const durationDays = banDuration ? Number.parseInt(banDuration, 10) : null;
+    banMutation.mutate({
+      id: banTarget.id.toString(),
+      reason: banReason.trim() || undefined,
+      durationDays: Number.isFinite(durationDays) ? durationDays : null,
+    });
+  };
 
   return (
     <div className="min-w-0 space-y-4">
-      {confirmDialog}
-
-      {/* Search */}
-      <div className="min-w-0 bg-white dark:bg-gray-800 shadow rounded-lg p-4">
-        <div className="flex min-w-0 gap-4">
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => {
-              setSearchQuery(e.target.value);
-              setPage(1);
-            }}
-            placeholder="Search by username..."
-            className="min-h-[44px] min-w-0 flex-1 rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-700 dark:text-white"
-          />
+      <div className="rounded-lg bg-white p-4 shadow dark:bg-gray-800">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div className="relative min-w-0 flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+            <input
+              type="search"
+              value={searchQuery}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setPage(1);
+              }}
+              placeholder="Search users"
+              className="min-h-[44px] w-full rounded-md border border-gray-300 bg-white pl-9 pr-3 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+            />
+          </div>
+          <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-300">
+            <UserCog className="h-4 w-4" />
+            {isFetching ? 'Refreshing' : `${total} users`}
+          </div>
         </div>
       </div>
 
-      {/* Users Table */}
-      {searchQuery.length > 0 && (
-        <div className="min-w-0 max-w-full overflow-hidden rounded-lg bg-white shadow dark:bg-gray-800">
-          {isLoading ? (
-            <div className="text-center py-8 text-gray-500">Loading users...</div>
-          ) : users.length === 0 ? (
-            <div className="text-center py-8 text-gray-500">No users found</div>
-          ) : (
-            <>
-              <div className="max-w-full overflow-x-auto overscroll-x-contain">
-                <table className="min-w-[44rem] divide-y divide-gray-200 dark:divide-gray-700 md:min-w-full">
-                  <thead className="bg-gray-50 dark:bg-gray-700">
-                    <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                        Username
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                        Status
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                        Admin
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                        Created
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider sticky right-0 bg-gray-50 dark:bg-gray-700 after:absolute after:inset-y-0 after:left-0 after:w-px after:bg-gray-300 dark:after:bg-gray-600">
-                        Actions
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                    {users.map((user: User) => (
-                      <tr key={user.id} className="hover:bg-gray-50 dark:hover:bg-gray-700">
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">
+      <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
+        <div className="min-w-0 overflow-hidden rounded-lg bg-white shadow dark:bg-gray-800">
+          <div className="max-w-full overflow-x-auto overscroll-x-contain">
+            <table className="min-w-[62rem] divide-y divide-gray-200 dark:divide-gray-700 md:min-w-full">
+              <thead className="bg-gray-50 dark:bg-gray-700">
+                <tr>
+                  <SortableHeader label="Username" field="username" sortBy={sortBy} sortOrder={sortOrder} onSort={changeSort} />
+                  <SortableHeader label="Status" field="status" sortBy={sortBy} sortOrder={sortOrder} onSort={changeSort} />
+                  <SortableHeader label="Role" field="role" sortBy={sortBy} sortOrder={sortOrder} onSort={changeSort} />
+                  <SortableHeader label="Created" field="createdAt" sortBy={sortBy} sortOrder={sortOrder} onSort={changeSort} />
+                  <th className="sticky right-0 bg-gray-50 px-6 py-3 text-left text-xs font-medium uppercase text-gray-500 dark:bg-gray-700 dark:text-gray-300">
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
+                {isLoading ? (
+                  <tr>
+                    <td className="px-6 py-10 text-center text-sm text-gray-500" colSpan={5}>
+                      Loading users...
+                    </td>
+                  </tr>
+                ) : users.length === 0 ? (
+                  <tr>
+                    <td className="px-6 py-10 text-center text-sm text-gray-500" colSpan={5}>
+                      No users found
+                    </td>
+                  </tr>
+                ) : (
+                  users.map((user) => (
+                    <tr
+                      key={user.id}
+                      className="hover:bg-gray-50 dark:hover:bg-gray-700/60"
+                    >
+                      <td className="px-6 py-4 text-sm font-medium text-gray-900 dark:text-white">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedUser(user)}
+                          className="text-left hover:underline"
+                        >
                           {user.username}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <span
-                            className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                              user.is_active
-                                ? 'bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-100'
-                                : 'bg-red-100 text-red-800 dark:bg-red-800 dark:text-red-100'
-                            }`}
+                        </button>
+                      </td>
+                      <td className="px-6 py-4">
+                        <StatusBadge active={user.is_active} />
+                      </td>
+                      <td className="px-6 py-4">
+                        <select
+                          value={displayRole(user)}
+                          onChange={(e) =>
+                            roleMutation.mutate({
+                              id: user.id.toString(),
+                              role: e.target.value as AdminUserRole,
+                            })
+                          }
+                          disabled={roleMutation.isPending}
+                          aria-label={`Change role for ${user.username}`}
+                          className="min-h-[40px] rounded-md border border-gray-300 bg-white px-2 text-sm capitalize text-gray-900 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                        >
+                          {roles.map((role) => (
+                            <option key={role} value={role}>
+                              {role}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-500 dark:text-gray-400">
+                        {new Date(user.createdAt).toLocaleDateString()}
+                      </td>
+                      <td className="sticky right-0 bg-white px-6 py-4 dark:bg-gray-800">
+                        <div className="flex gap-2">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setSelectedUser(user)}
+                            aria-label={`View ${user.username}`}
+                            className="rounded-md px-3"
                           >
-                            {user.is_active ? 'Active' : 'Banned'}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                          {user.isAdmin ? 'Yes' : 'No'}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                          {new Date(user.createdAt).toLocaleDateString()}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium sticky right-0 bg-white dark:bg-gray-800 after:absolute after:inset-y-0 after:left-0 after:w-px after:bg-gray-200 dark:after:bg-gray-700">
-                          <div className="flex gap-2">
-                            {user.is_active ? (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleBan(user)}
-                                aria-label={`Ban ${user.username}`}
-                                className="min-h-[44px] min-w-[44px] rounded-md px-3 text-red-600 hover:text-red-900 dark:text-red-400"
-                              >
-                                Ban
-                              </Button>
-                            ) : (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleUnban(user)}
-                                aria-label={`Unban ${user.username}`}
-                                className="min-h-[44px] min-w-[44px] rounded-md px-3 text-green-600 hover:text-green-900 dark:text-green-400"
-                              >
-                                Unban
-                              </Button>
-                            )}
+                            <Eye className="h-4 w-4" />
+                            View
+                          </Button>
+                          {user.is_active ? (
                             <Button
                               variant="ghost"
                               size="sm"
-                              onClick={() => setSelectedUser(user)}
-                              aria-label={`View history for ${user.username}`}
-                              className="min-h-[44px] min-w-[64px] rounded-md px-3 text-indigo-600 hover:text-indigo-900 dark:text-indigo-400"
+                              onClick={() => setBanTarget(user)}
+                              aria-label={`Ban ${user.username}`}
+                              className="rounded-md px-3 text-red-600 dark:text-red-400"
                             >
-                              History
+                              <Ban className="h-4 w-4" />
+                              Ban
                             </Button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                          ) : (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => unbanMutation.mutate(user.id.toString())}
+                              aria-label={`Unban ${user.username}`}
+                              className="rounded-md px-3 text-green-600 dark:text-green-400"
+                            >
+                              <RotateCcw className="h-4 w-4" />
+                              Unban
+                            </Button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
 
-              {/* Pagination */}
-              {totalPages > 1 && (
-                <div className="flex flex-col gap-3 border-t border-gray-200 px-4 py-4 dark:border-gray-700 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-                  <div className="text-sm text-gray-700 dark:text-gray-300">
-                    Showing {(page - 1) * limit + 1} to {Math.min(page * limit, total)} of {total}{' '}
-                    results
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      type="button"
-                      onClick={() => setPage((p) => Math.max(1, p - 1))}
-                      disabled={page === 1}
-                      aria-label="Previous page"
-                      className="px-4 py-2 border rounded-md disabled:opacity-50"
-                    >
-                      Previous
-                    </Button>
-                    <Button
-                      type="button"
-                      onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                      disabled={page === totalPages}
-                      aria-label="Next page"
-                      className="px-4 py-2 border rounded-md disabled:opacity-50"
-                    >
-                      Next
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </>
-          )}
+          <div className="flex flex-col gap-3 border-t border-gray-200 px-4 py-4 dark:border-gray-700 sm:flex-row sm:items-center sm:justify-between">
+            <div className="text-sm text-gray-700 dark:text-gray-300">
+              Showing {total === 0 ? 0 : (page - 1) * limit + 1} to {Math.min(page * limit, total)} of {total}
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page === 1}
+                aria-label="Previous page"
+                className="rounded-md"
+              >
+                <ChevronLeft className="h-4 w-4" />
+                Previous
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page >= totalPages}
+                aria-label="Next page"
+                className="rounded-md"
+              >
+                Next
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
         </div>
-      )}
 
-      {/* User History Modal */}
-      {selectedUser && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-medium text-gray-900 dark:text-white">
-                User History: {selectedUser.username}
+        <UserDetailPanel user={selectedUser || users[0] || null} />
+      </div>
+
+      {banTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-lg bg-white p-5 shadow-xl dark:bg-gray-800">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                Ban {banTarget.username}
               </h3>
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => setSelectedUser(null)}
-                aria-label="Close user history"
-                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 p-0"
+                onClick={() => setBanTarget(null)}
+                aria-label="Close ban dialog"
+                className="rounded-md px-3"
               >
-                ✕
+                x
               </Button>
             </div>
-            <UserHistory userId={selectedUser.id.toString()} />
+            <div className="space-y-3">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Reason
+                <textarea
+                  value={banReason}
+                  onChange={(e) => setBanReason(e.target.value)}
+                  className="mt-1 min-h-24 w-full rounded-md border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                  maxLength={500}
+                />
+              </label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Duration
+                <select
+                  value={banDuration}
+                  onChange={(e) => setBanDuration(e.target.value)}
+                  className="mt-1 min-h-[44px] w-full rounded-md border border-gray-300 bg-white px-3 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                >
+                  <option value="">Indefinite</option>
+                  <option value="1">1 day</option>
+                  <option value="7">7 days</option>
+                  <option value="30">30 days</option>
+                  <option value="90">90 days</option>
+                </select>
+              </label>
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setBanTarget(null)}
+                className="rounded-md"
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={submitBan}
+                isLoading={banMutation.isPending}
+                className="rounded-md"
+              >
+                <Ban className="h-4 w-4" />
+                Ban User
+              </Button>
+            </div>
           </div>
         </div>
       )}
@@ -251,87 +367,153 @@ export default function UserManagement() {
   );
 }
 
-function UserHistory({ userId }: { userId: string }) {
+function SortableHeader({
+  label,
+  field,
+  sortBy,
+  sortOrder,
+  onSort,
+}: {
+  label: string;
+  field: UserSortField;
+  sortBy: UserSortField;
+  sortOrder: SortOrder;
+  onSort: (field: UserSortField) => void;
+}) {
+  return (
+    <th className="px-6 py-3 text-left text-xs font-medium uppercase text-gray-500 dark:text-gray-300">
+      <button
+        type="button"
+        onClick={() => onSort(field)}
+        className="inline-flex min-h-[32px] items-center gap-1"
+      >
+        {label}
+        {sortBy === field ? (sortOrder === 'ASC' ? 'A-Z' : 'Z-A') : ''}
+      </button>
+    </th>
+  );
+}
+
+function StatusBadge({ active }: { active: boolean }) {
+  return (
+    <span
+      className={`inline-flex rounded-full px-2 text-xs font-semibold leading-5 ${
+        active
+          ? 'bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-100'
+          : 'bg-red-100 text-red-800 dark:bg-red-800 dark:text-red-100'
+      }`}
+    >
+      {active ? 'Active' : 'Banned'}
+    </span>
+  );
+}
+
+function UserDetailPanel({ user }: { user: User | null }) {
+  const userId = user?.id.toString();
   const { data, isLoading } = useQuery({
-    queryKey: queryKeys.admin.users.history(userId),
-    queryFn: () => adminApi.getUserHistory(userId),
+    queryKey: queryKeys.admin.users.history(userId || 'none'),
+    queryFn: () => adminApi.getUserHistory(userId || ''),
+    enabled: Boolean(userId),
   });
 
-  if (isLoading) {
-    return <div className="text-center py-4 text-gray-500">Loading history...</div>;
+  if (!user) {
+    return (
+      <aside className="rounded-lg bg-white p-5 text-sm text-gray-500 shadow dark:bg-gray-800">
+        Select a user to view profile and activity.
+      </aside>
+    );
   }
 
-  if (!data) {
-    return <div className="text-center py-4 text-gray-500">No history found</div>;
-  }
+  const profile = data?.user || user;
+  const summary = data?.summary;
+  const timeline = data?.activityTimeline || [];
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h4 className="font-medium text-gray-900 dark:text-white mb-2">Confessions</h4>
-        {data.note && (
-          <div className="text-xs text-gray-500 dark:text-gray-400 mb-2">{data.note}</div>
-        )}
-        {data.confessions?.length ? (
-          <div className="space-y-2">
-            {data.confessions.slice(0, 20).map((c: any) => (
-              <div
-                key={c.id}
-                className="p-3 rounded border border-gray-200 dark:border-gray-700"
-              >
-                <div className="text-xs text-gray-500 dark:text-gray-400">
-                  {c.created_at ? new Date(c.created_at).toLocaleString() : ''}
-                </div>
-                <div className="text-sm text-gray-900 dark:text-white mt-1 line-clamp-2">
-                  {c.message}
-                </div>
-                <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-1 font-mono">
-                  {c.id}
-                </div>
-              </div>
-            ))}
+    <aside className="min-w-0 rounded-lg bg-white p-5 shadow dark:bg-gray-800 xl:sticky xl:top-4 xl:self-start">
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="truncate text-lg font-semibold text-gray-900 dark:text-white">
+            {profile.username}
+          </h3>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            <StatusBadge active={profile.is_active} />
+            <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-xs capitalize text-gray-700 dark:bg-gray-700 dark:text-gray-200">
+              <Shield className="h-3 w-3" />
+              {displayRole(profile)}
+            </span>
           </div>
-        ) : (
-          <div className="text-sm text-gray-600 dark:text-gray-400">No confessions found</div>
-        )}
+        </div>
       </div>
-      <div>
-        <h4 className="font-medium text-gray-900 dark:text-white mb-2">Reports</h4>
-        {data.reports?.length ? (
-          <div className="space-y-2">
-            {data.reports.slice(0, 20).map((r: any) => (
-              <div
-                key={r.id}
-                className="p-3 rounded border border-gray-200 dark:border-gray-700"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="text-sm font-medium text-gray-900 dark:text-white">
-                    {r.type} · {r.status}
-                  </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">
-                    {r.createdAt ? new Date(r.createdAt).toLocaleString() : ''}
-                  </div>
-                </div>
-                {r.reason && (
-                  <div className="text-sm text-gray-700 dark:text-gray-200 mt-1">
-                    {r.reason}
-                  </div>
-                )}
-                {r.confession?.message && (
-                  <div className="text-sm text-gray-700 dark:text-gray-200 mt-2 line-clamp-2">
-                    Confession: {r.confession.message}
-                  </div>
-                )}
-                <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-1 font-mono">
-                  {r.id}
-                </div>
-              </div>
-            ))}
+
+      {isLoading ? (
+        <div className="py-8 text-center text-sm text-gray-500">Loading profile...</div>
+      ) : (
+        <div className="space-y-5">
+          <dl className="grid grid-cols-3 gap-2 text-center">
+            <Metric label="Confessions" value={summary?.confessionCount ?? 0} />
+            <Metric label="Reports In" value={summary?.reportsReceived ?? 0} />
+            <Metric label="Reports Out" value={summary?.reportsFiled ?? 0} />
+          </dl>
+
+          <div className="space-y-2 text-sm">
+            <InfoRow label="User ID" value={String(profile.id)} />
+            <InfoRow label="Created" value={new Date(profile.createdAt).toLocaleString()} />
+            <InfoRow label="Updated" value={new Date(profile.updatedAt).toLocaleString()} />
           </div>
-        ) : (
-          <div className="text-sm text-gray-600 dark:text-gray-400">No reports found</div>
-        )}
-      </div>
+
+          <div>
+            <h4 className="mb-2 text-sm font-semibold text-gray-900 dark:text-white">
+              Activity
+            </h4>
+            {timeline.length ? (
+              <div className="space-y-2">
+                {timeline.map((item) => (
+                  <div
+                    key={`${item.type}-${item.id}`}
+                    className="rounded-md border border-gray-200 p-3 dark:border-gray-700"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-sm font-medium text-gray-900 dark:text-white">
+                        {item.label}
+                      </div>
+                      <div className="whitespace-nowrap text-xs text-gray-500">
+                        {new Date(item.createdAt).toLocaleDateString()}
+                      </div>
+                    </div>
+                    {item.summary && (
+                      <div className="mt-1 line-clamp-2 text-sm text-gray-600 dark:text-gray-300">
+                        {item.summary}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-md border border-dashed border-gray-300 p-4 text-sm text-gray-500 dark:border-gray-700">
+                No recent activity.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </aside>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-md bg-gray-50 p-3 dark:bg-gray-700/60">
+      <div className="text-lg font-semibold text-gray-900 dark:text-white">{value}</div>
+      <div className="text-xs text-gray-500 dark:text-gray-300">{label}</div>
+    </div>
+  );
+}
+
+function InfoRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex justify-between gap-3 border-b border-gray-100 py-2 dark:border-gray-700">
+      <span className="text-gray-500 dark:text-gray-400">{label}</span>
+      <span className="truncate text-right text-gray-900 dark:text-white">{value}</span>
     </div>
   );
 }

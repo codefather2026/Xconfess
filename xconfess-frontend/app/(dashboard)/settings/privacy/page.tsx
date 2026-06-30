@@ -1,8 +1,9 @@
 "use client";
 
 import React, { useEffect, useState } from 'react';
-import { Shield, Eye, MessageSquare, Database, Save } from 'lucide-react';
+import { Shield, Eye, MessageSquare, Database, Save, Sun, Moon, Laptop } from 'lucide-react';
 import { useGlobalToast } from '@/app/components/common/Toast';
+import { useTheme } from '@/app/lib/hooks/useTheme';
 
 interface PrivacySettings {
   isDiscoverable: boolean;
@@ -12,6 +13,7 @@ interface PrivacySettings {
 }
 
 export default function PrivacySettingsPage() {
+  const { theme, setTheme } = useTheme();
   const [settings, setSettings] = useState<PrivacySettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -109,6 +111,53 @@ export default function PrivacySettingsPage() {
         <p className="text-gray-400 mt-1">
           Manage your visibility and consent controls
         </p>
+      </div>
+
+      <div className="bg-gray-800 rounded-lg mb-4">
+        <div className="p-4 border-b border-gray-700">
+          <h2 className="font-semibold text-white flex items-center gap-2">
+            <Sun className="h-4 w-4" />
+            Theme Preference
+          </h2>
+          <p className="text-sm text-gray-400">Choose your appearance</p>
+        </div>
+        <div className="p-4">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setTheme("light")}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+                theme === "light"
+                  ? "bg-purple-600 text-white"
+                  : "bg-gray-700 text-gray-300 hover:bg-gray-600"
+              }`}
+            >
+              <Sun className="h-4 w-4" />
+              Light
+            </button>
+            <button
+              onClick={() => setTheme("dark")}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+                theme === "dark"
+                  ? "bg-purple-600 text-white"
+                  : "bg-gray-700 text-gray-300 hover:bg-gray-600"
+              }`}
+            >
+              <Moon className="h-4 w-4" />
+              Dark
+            </button>
+            <button
+              onClick={() => setTheme("system")}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+                theme === "system"
+                  ? "bg-purple-600 text-white"
+                  : "bg-gray-700 text-gray-300 hover:bg-gray-600"
+              }`}
+            >
+              <Laptop className="h-4 w-4" />
+              System
+            </button>
+          </div>
+        </div>
       </div>
 
       <div className="bg-gray-800 rounded-lg mb-4">

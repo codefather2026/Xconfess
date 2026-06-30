@@ -6,6 +6,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AdminGuard } from '../auth/admin.guard';
 import { ModerationTemplateService } from '../comment/moderation-template.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
+import { StellarDiagnosticsService } from './services/stellar-diagnostics.service';
 
 describe('AdminController', () => {
   let controller: AdminController;
@@ -23,6 +24,8 @@ describe('AdminController', () => {
     unhideConfession: jest.fn(),
     searchUsers: jest.fn(),
     getUserHistory: jest.fn(),
+    unlockAccount: jest.fn(),
+    updateUserRole: jest.fn(),
     banUser: jest.fn(),
     unbanUser: jest.fn(),
     getAnalytics: jest.fn(),
@@ -36,6 +39,10 @@ describe('AdminController', () => {
 
   const mockAuditLogService = {
     findAll: jest.fn(),
+  };
+
+  const mockStellarDiagnosticsService = {
+    getDiagnostics: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -57,6 +64,10 @@ describe('AdminController', () => {
         {
           provide: AuditLogService,
           useValue: mockAuditLogService,
+        },
+        {
+          provide: StellarDiagnosticsService,
+          useValue: mockStellarDiagnosticsService,
         },
       ],
     })
@@ -173,9 +184,10 @@ describe('AdminController', () => {
   });
 
   describe('users', () => {
-    it('searchUsers returns empty when q missing', async () => {
+    it('searchUsers lists users when q missing', async () => {
+      mockAdminService.searchUsers.mockResolvedValue([[{ id: 1 }], 1]);
       const res = await controller.searchUsers('' as any);
-      expect(res).toEqual({ users: [], total: 0 });
+      expect(res).toEqual({ users: [{ id: 1 }], total: 1 });
     });
 
     it('searchUsers calls service when q present', async () => {
@@ -188,10 +200,25 @@ describe('AdminController', () => {
       mockAdminService.banUser.mockResolvedValue({ id: 2, is_active: false });
       mockAdminService.unbanUser.mockResolvedValue({ id: 2, is_active: true });
       const req = { user: { userId: '1' } } as any;
-      await controller.banUser('2', { reason: 'x' }, req);
-      await controller.unbanUser('2', req);
+      await controller.banUser('2', { reason: 'x' }, 1, req);
+      await controller.unbanUser('2', 1, req);
       expect(adminService.banUser).toHaveBeenCalled();
       expect(adminService.unbanUser).toHaveBeenCalled();
+    });
+
+    it('updateUserRole calls service', async () => {
+      mockAdminService.updateUserRole.mockResolvedValue({
+        id: 2,
+        role: 'moderator',
+      });
+      const req = { user: { userId: '1' } } as any;
+      await controller.updateUserRole('2', { role: 'moderator' as any }, 1, req);
+      expect(adminService.updateUserRole).toHaveBeenCalledWith(
+        2,
+        'moderator',
+        1,
+        req,
+      );
     });
   });
 

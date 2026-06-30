@@ -160,6 +160,8 @@ npm test
 
 Root `npm test` runs backend unit tests, then contract tests via `npm run contract:test`. Use it when you want the same contract coverage as CI without running the full `npm run ci` pipeline.
 
+For backend directories that are intentionally test-light, such as migrations, type definitions, and DTOs, see the [backend testing notes](xconfess-backend/README.md#intentionally-test-light-directories).
+
 ### Soroban contracts (Rust / `cargo`)
 
 Rust commands for `xconfess-contracts` must be run with that directory as the working directory (or use the root `npm run contract:*` scripts, which delegate there automatically).

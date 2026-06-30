@@ -1,4 +1,5 @@
-import { Logger, Module } from '@nestjs/common';
+import { Logger, MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
+import { SanitizationMiddleware } from './middleware/sanitization.middleware';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -152,4 +153,8 @@ import { BullModule } from '@nestjs/bullmq';
     },
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(SanitizationMiddleware).forRoutes('*');
+  }
+}

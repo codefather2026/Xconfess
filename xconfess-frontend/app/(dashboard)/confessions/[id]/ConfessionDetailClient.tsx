@@ -22,6 +22,7 @@ import { Card, CardContent, CardHeader } from "@/app/components/ui/card";
 import { Button } from "@/app/components/ui/button";
 import { ReactionButton } from "@/app/components/confession/ReactionButtons";
 import { AnchorButton } from "@/app/components/confession/AnchorButton";
+import { TipButton } from "@/app/components/confession/TipButton";
 import { ShareButton } from "@/app/components/confession/ShareButton";
 import { CommentSection } from "@/app/components/confession/CommentSection";
 import { RelatedConfessions } from "@/app/components/confession/RelatedConfessions";
@@ -42,6 +43,7 @@ interface ConfessionDetailClientProps {
     isAnchored?: boolean;
     stellarTxHash?: string | null;
     anchorStatus?: "confirmed" | "pending" | "not_anchored";
+    author?: { id: string; username?: string; avatar?: string | null; stellarAddress?: string };
   } | null; // Changed to allow null for explicit 404 tracking
   confessionId: string;
 }
@@ -329,6 +331,10 @@ export function ConfessionDetailClient({
                   type="love"
                   count={confession.reactions.love}
                   confessionId={confessionId}
+                />
+                <TipButton
+                  confessionId={confessionId}
+                  recipientAddress={confession.author?.stellarAddress}
                 />
                 <AnchorButton
                   confessionId={confessionId}

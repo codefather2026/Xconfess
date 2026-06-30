@@ -3,6 +3,7 @@ import { AuthService } from './auth.service';
 import { UserService } from '../user/user.service';
 import { EmailService } from '../email/email.service';
 import { PasswordResetService } from './password-reset.service';
+import { LockoutService } from './lockout.service';
 import { JwtService } from '@nestjs/jwt';
 import { HttpStatus } from '@nestjs/common';
 import { User, UserRole } from '../user/entities/user.entity';
@@ -91,6 +92,16 @@ describe('AuthService', () => {
     getOrCreateForUserSession: jest.fn().mockResolvedValue({ id: 'anon-1' }),
   };
 
+  const mockLockoutService = {
+    getStatus: jest.fn().mockResolvedValue({
+      isLocked: false,
+      attemptsRemaining: 5,
+      lockCount: 0,
+    }),
+    recordFailedAttempt: jest.fn(),
+    clearLockout: jest.fn(),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -114,6 +125,10 @@ describe('AuthService', () => {
         {
           provide: AnonymousUserService,
           useValue: mockAnonymousUserService,
+        },
+        {
+          provide: LockoutService,
+          useValue: mockLockoutService,
         },
       ],
     }).compile();

@@ -20,6 +20,7 @@ import { ConfigService } from '@nestjs/config';
 import { Tip } from '../../tipping/entities/tip.entity';
 import { AuditLogService } from '../../audit-log/audit-log.service';
 import { JobManagementService } from '../../notifications/services/job-management.service';
+import { LockoutService } from '../../auth/lockout.service';
 
 export interface BulkResolveOutcome {
   id: string;
@@ -34,6 +35,9 @@ export interface BulkResolveResult {
   notFound: number;
   outcomes: BulkResolveOutcome[];
 }
+
+type UserSortField = 'createdAt' | 'username' | 'role' | 'status';
+type SortOrder = 'ASC' | 'DESC';
 
 @Injectable()
 export class AdminService {
@@ -69,6 +73,7 @@ export class AdminService {
     private readonly eventEmitter: EventEmitter2,
     private readonly auditLogService: AuditLogService,
     private readonly jobManagementService: JobManagementService,
+    private readonly lockoutService: LockoutService,
   ) {}
 
   private get aesKey(): string {
@@ -436,16 +441,18 @@ export class AdminService {
   }
 
   // Users
-  
+
   async unlockAccount(email: string): Promise<void> {
     await this.lockoutService.clearLockout(email);
-    this.logger.log(Admin unlocked account: \);
+    this.logger.log(`Admin unlocked account: ${email}`);
   }
+
   async banUser(
     userId: number,
     adminId: number,
     reason: string | null,
     request?: Request,
+    durationDays: number | null = null,
   ): Promise<User> {
     return this.runInModerationTransaction(async (manager) => {
       const userRepo = manager.getRepository(User);
@@ -461,14 +468,68 @@ export class AdminService {
 
       user.is_active = false;
       const saved = await userRepo.save(user);
+      const bannedUntil = durationDays
+        ? new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000)
+        : null;
 
       await this.moderationService.logAction(
         adminId,
         AuditActionType.USER_BANNED,
         'user',
         userId.toString(),
-        { reason },
+        {
+          reason,
+          durationDays,
+          bannedUntil: bannedUntil?.toISOString() ?? null,
+        },
         reason,
+        request,
+        manager,
+      );
+
+      return saved;
+    });
+  }
+
+  async updateUserRole(
+    userId: number,
+    role: UserRole,
+    adminId: number,
+    request?: Request,
+  ): Promise<User> {
+    if (!Object.values(UserRole).includes(role)) {
+      throw new BadRequestException('Invalid role');
+    }
+
+    return this.runInModerationTransaction(async (manager) => {
+      const userRepo = manager.getRepository(User);
+      const user = await userRepo.findOne({ where: { id: userId } });
+
+      if (!user) {
+        throw new NotFoundException('User not found');
+      }
+
+      const previousRole = user.role || UserRole.USER;
+      if (previousRole === role) {
+        return user;
+      }
+
+      user.role = role;
+      const saved = await userRepo.save(user);
+      const action =
+        role === UserRole.ADMIN
+          ? AuditActionType.USER_ADMIN_GRANTED
+          : previousRole === UserRole.ADMIN
+            ? AuditActionType.USER_ADMIN_REVOKED
+            : AuditActionType.MODERATION_OVERRIDE;
+
+      await this.moderationService.logAction(
+        adminId,
+        action,
+        'user',
+        userId.toString(),
+        { previousRole, role },
+        `Role changed from ${previousRole} to ${role}`,
         request,
         manager,
       );
@@ -516,16 +577,33 @@ export class AdminService {
     query: string,
     limit = 50,
     offset = 0,
+    sortBy: UserSortField = 'createdAt',
+    sortOrder: SortOrder = 'DESC',
   ): Promise<[User[], number]> {
+    const safeLimit = Math.min(Math.max(limit, 1), 100);
+    const safeOffset = Math.max(offset, 0);
+    const sortColumns: Record<UserSortField, string> = {
+      createdAt: 'user.createdAt',
+      username: 'user.username',
+      role: 'user.role',
+      status: 'user.is_active',
+    };
+    const sortColumn = sortColumns[sortBy] ?? sortColumns.createdAt;
+    const direction = sortOrder === 'ASC' ? 'ASC' : 'DESC';
     const qb = this.userRepository
       .createQueryBuilder('user')
-      .where('user.username ILIKE :query', { query: `%${query}%` })
-      .orWhere('user.emailHash = :hash', {
-        hash: query, // This won't work well, but keeping for structure
-      })
-      .orderBy('user.createdAt', 'DESC')
-      .take(limit)
-      .skip(offset);
+      .orderBy(sortColumn, direction)
+      .take(safeLimit)
+      .skip(safeOffset);
+
+    const trimmed = query.trim();
+    if (trimmed) {
+      qb.where('user.username ILIKE :query', {
+        query: `%${trimmed}%`,
+      }).orWhere('user.emailHash = :hash', {
+        hash: trimmed,
+      });
+    }
 
     return qb.getManyAndCount();
   }
@@ -580,17 +658,65 @@ export class AdminService {
       }
     }
 
+    let reportsReceived = 0;
+    if (anonIds.length) {
+      try {
+        reportsReceived = await this.reportRepository
+          .createQueryBuilder('report')
+          .leftJoin('report.confession', 'confession')
+          .leftJoin('confession.anonymousUser', 'anon')
+          .where('anon.id IN (:...anonIds)', { anonIds })
+          .getCount();
+      } catch (error) {
+        this.logger.warn(
+          `Failed to count reports received for user ${userId}: ${
+            error instanceof Error ? error.message : 'unknown'
+          }`,
+        );
+      }
+    }
+
+    const activityTimeline = [
+      ...confessions.slice(0, 20).map((confession: any) => ({
+        id: confession.id,
+        type: 'confession',
+        label: 'Published confession',
+        createdAt: confession.created_at || confession.createdAt,
+        summary: confession.message,
+      })),
+      ...reports.slice(0, 20).map((report: any) => ({
+        id: report.id,
+        type: 'report',
+        label: 'Submitted report',
+        createdAt: report.createdAt,
+        summary: report.reason || report.type,
+      })),
+    ]
+      .filter((entry) => entry.createdAt)
+      .sort(
+        (a, b) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      )
+      .slice(0, 30);
+
     return {
       user: {
         id: user.id,
         username: user.username,
+        role: user.role || UserRole.USER,
         isAdmin: user.role === UserRole.ADMIN,
         is_active: user.is_active,
         createdAt: user.createdAt,
         updatedAt: user.updatedAt,
       },
+      summary: {
+        confessionCount: confessions.length,
+        reportsFiled: reports.length,
+        reportsReceived,
+      },
       confessions,
       reports,
+      activityTimeline,
       note: anonIds.length
         ? 'Confessions derived from user session mappings (user_anonymous_users)'
         : 'No anonymous session mappings found for this user yet',
@@ -929,4 +1055,3 @@ export class AdminService {
     };
   }
 }
-

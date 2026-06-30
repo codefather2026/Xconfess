@@ -124,6 +124,16 @@ npm run test:e2e
 npm run test:cov
 ```
 
+### Intentionally Test-Light Directories
+
+Some backend directories are expected to have few or no dedicated `*.spec.ts` files:
+
+| Directory | Why it is test-light |
+| --- | --- |
+| `migrations/` and `src/migrations/` | TypeORM migration files are mostly timestamped schema changes. They are reviewed for SQL/schema correctness and exercised when a database is migrated, with focused specs added only for migration helpers or unusually risky data movement. |
+| `src/types/` | Shared TypeScript-only type definitions compile away at runtime, so coverage comes from `tsc` and the code that consumes those types. |
+| `src/**/dto/` | DTOs are mostly declarative validation and API-shape classes. Add focused specs when a DTO contains custom validation, transformation, or other behavior; otherwise controller and e2e tests cover the request/response paths that use them. |
+
 ## Environment Variables
 
 Copy `.env.example` to `.env` and update the values:
