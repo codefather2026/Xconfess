@@ -10,15 +10,14 @@ export class ResolveReportDto {
   /**
    * The moderation decision.
    *
-   * Using @IsIn rather than @IsEnum because the two valid values ('resolved',
-   * 'dismissed') are not a TypeScript enum — they are a union type used
-   * directly in the service.  @IsIn validates against an explicit allowlist
-   * and produces a clear error message listing the accepted values.
+   * @IsIn validates against an explicit allowlist and produces a clear error
+   * message listing the accepted values.
    */
-  @IsIn(['resolved', 'dismissed'], {
-    message: "action must be either 'resolved' or 'dismissed'",
+  @IsIn(['reviewing', 'resolved', 'rejected', 'dismissed', 'escalated'], {
+    message:
+      "action must be one of 'reviewing', 'resolved', 'rejected', 'dismissed', or 'escalated'",
   })
-  action: 'resolved' | 'dismissed';
+  action: 'reviewing' | 'resolved' | 'rejected' | 'dismissed' | 'escalated';
 
   /**
    * Optional moderator note stored alongside the resolution.

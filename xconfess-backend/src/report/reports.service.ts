@@ -7,7 +7,11 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Report, ReportStatus, ReportType } from '../admin/entities/report.entity'
+import {
+  Report,
+  ReportStatus,
+  ReportType,
+} from '../admin/entities/report.entity';
 import { CreateReportDto } from './dto/create-report.dto';
 import { ResolveReportDto } from './dto/resolve-report.dto';
 import { AnonymousConfession } from '../confession/entities/confession.entity';
@@ -21,6 +25,8 @@ import {
   OutboxEvent,
   OutboxStatus,
 } from '../common/entities/outbox-event.entity';
+import { AuditActionType } from '../audit-log/audit-log.entity';
+import { assertValidReportStatusTransition } from './report-lifecycle';
 
 export const DUPLICATE_REPORT_MESSAGE =
   'You have already reported this confession within the last 24 hours.';
@@ -136,7 +142,7 @@ export class ReportsService {
           reporterId === null ? context?.anonymousUserId : undefined,
         type: dto.type ?? ReportType.OTHER,
         reason: dto.reason ?? null,
-        status: ReportStatus.PENDING,
+        status: ReportStatus.OPEN,
         // Idempotency fields (null when no key was provided)
         idempotencyKey: idempotencyKey ?? null,
       });
@@ -231,20 +237,14 @@ export class ReportsService {
       throw new NotFoundException(`Report with ID ${reportId} not found`);
     if (!this.isAdmin(admin))
       throw new ForbiddenException('Only admins can resolve reports');
-    if (
-      report.status === ReportStatus.RESOLVED ||
-      report.status === ReportStatus.DISMISSED
-    ) {
-      throw new BadRequestException(`Report is already ${report.status}`);
-    }
-
     const previousStatus = report.status;
-    report.status = ReportStatus.RESOLVED;
-    report.resolvedBy = admin.id;
-    report.resolvedAt = new Date();
-    report.resolutionNotes = options?.reason || 'Report resolved';
-
-    const updatedReport = await this.reportRepository.save(report);
+    const updatedReport = await this.transitionReportStatus(report, {
+      status: ReportStatus.RESOLVED,
+      actorId: admin.id,
+      actorName: admin.username,
+      reason: options?.reason || 'Report resolved',
+      context: { ipAddress: options?.ipAddress, userAgent: options?.userAgent },
+    });
 
     this.auditLogService
       .logReportResolved(
@@ -280,20 +280,14 @@ export class ReportsService {
       throw new NotFoundException(`Report with ID ${reportId} not found`);
     if (!this.isAdmin(admin))
       throw new ForbiddenException('Only admins can dismiss reports');
-    if (
-      report.status === ReportStatus.RESOLVED ||
-      report.status === ReportStatus.DISMISSED
-    ) {
-      throw new BadRequestException(`Report is already ${report.status}`);
-    }
-
     const previousStatus = report.status;
-    report.status = ReportStatus.DISMISSED;
-    report.resolvedBy = admin.id;
-    report.resolvedAt = new Date();
-    report.resolutionNotes = options?.reason ?? 'Report dismissed';
-
-    const updatedReport = await this.reportRepository.save(report);
+    const updatedReport = await this.transitionReportStatus(report, {
+      status: ReportStatus.REJECTED,
+      actorId: admin.id,
+      actorName: admin.username,
+      reason: options?.reason ?? 'Report rejected',
+      context: { ipAddress: options?.ipAddress, userAgent: options?.userAgent },
+    });
 
     this.auditLogService
       .logReportDismissed(
@@ -327,35 +321,27 @@ export class ReportsService {
     });
 
     if (!report) throw new NotFoundException(`Report with ID ${id} not found`);
-    if (
-      report.status === ReportStatus.RESOLVED ||
-      report.status === ReportStatus.DISMISSED
-    ) {
-      throw new BadRequestException(`Report is already ${report.status}`);
-    }
-
     const action = dto.action;
+    const status = this.toReportStatus(action);
     const previousStatus = report.status;
-    const status =
-      action === 'resolved' ? ReportStatus.RESOLVED : ReportStatus.DISMISSED;
-    const defaultNote =
-      action === 'resolved' ? 'Report resolved' : 'Report dismissed';
+    const note = dto.note ?? this.getDefaultTransitionReason(status);
 
-    report.status = status;
-    report.resolvedBy = admin.id;
-    report.resolvedAt = new Date();
-    report.resolutionNotes = dto.note ?? defaultNote;
+    const updatedReport = await this.transitionReportStatus(report, {
+      status,
+      actorId: admin.id,
+      actorName: admin.username,
+      reason: note,
+      context,
+    });
 
-    const updatedReport = await this.reportRepository.save(report);
-
-    if (action === 'resolved') {
+    if (status === ReportStatus.RESOLVED) {
       this.auditLogService
         .logReportResolved(
           id,
           admin.id.toString(),
           {
             previousStatus,
-            reason: dto.note,
+            reason: note,
             confessionId: report.confessionId,
             resolvedBy: admin.username,
           },
@@ -364,14 +350,14 @@ export class ReportsService {
         .catch((e) =>
           this.logger.error(`Failed to log report resolution: ${e.message}`),
         );
-    } else {
+    } else if (status === ReportStatus.REJECTED) {
       this.auditLogService
         .logReportDismissed(
           id,
           admin.id.toString(),
           {
             previousStatus,
-            reason: dto.note,
+            reason: note,
             confessionId: report.confessionId,
             dismissedBy: admin.username,
           },
@@ -384,6 +370,85 @@ export class ReportsService {
 
     this.logger.log(`Report ${id} ${action} by admin ${admin.id}`);
     return updatedReport;
+  }
+
+  private async transitionReportStatus(
+    report: Report,
+    options: {
+      status: ReportStatus;
+      actorId: number;
+      actorName?: string;
+      reason: string;
+      context?: { ipAddress?: string; userAgent?: string };
+    },
+  ): Promise<Report> {
+    const previousStatus = report.status;
+    assertValidReportStatusTransition(previousStatus, options.status);
+
+    report.status = options.status;
+    report.resolvedBy = options.actorId;
+    report.resolutionNotes = options.reason;
+    if (
+      options.status === ReportStatus.RESOLVED ||
+      options.status === ReportStatus.REJECTED
+    ) {
+      report.resolvedAt = new Date();
+    }
+
+    const updatedReport = await this.reportRepository.save(report);
+
+    this.auditLogService
+      .log({
+        actionType: AuditActionType.REPORT_STATUS_TRANSITION,
+        metadata: {
+          reportId: report.id,
+          entityType: 'report',
+          entityId: report.id,
+          confessionId: report.confessionId,
+          from: previousStatus,
+          to: options.status,
+          reason: options.reason,
+          actorId: options.actorId,
+          actorName: options.actorName,
+          transitionedAt: new Date().toISOString(),
+        },
+        context: {
+          ...options.context,
+          userId: options.actorId,
+          actor: {
+            type: 'admin',
+            id: options.actorId.toString(),
+            label: options.actorName,
+          },
+        },
+      })
+      .catch((e) =>
+        this.logger.error(`Failed to log report transition: ${e.message}`),
+      );
+
+    return updatedReport;
+  }
+
+  private toReportStatus(action: ResolveReportDto['action']): ReportStatus {
+    if (action === 'dismissed') {
+      return ReportStatus.REJECTED;
+    }
+    return action as ReportStatus;
+  }
+
+  private getDefaultTransitionReason(status: ReportStatus): string {
+    switch (status) {
+      case ReportStatus.REVIEWING:
+        return 'Report moved to review';
+      case ReportStatus.ESCALATED:
+        return 'Report escalated';
+      case ReportStatus.RESOLVED:
+        return 'Report resolved';
+      case ReportStatus.REJECTED:
+        return 'Report rejected';
+      default:
+        return 'Report status updated';
+    }
   }
 
   async getReportAuditLogs(reportId: string): Promise<any> {

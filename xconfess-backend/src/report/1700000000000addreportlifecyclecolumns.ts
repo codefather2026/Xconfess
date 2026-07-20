@@ -7,17 +7,43 @@ export class AddReportLifecycleColumns1771601903901 implements MigrationInterfac
     // Create enum type safely (no-op if it already exists)
     await queryRunner.query(`
       DO $$ BEGIN
-        CREATE TYPE "public"."reports_status_enum" AS ENUM ('pending', 'resolved', 'dismissed');
+        CREATE TYPE "public"."reports_status_enum" AS ENUM ('open', 'reviewing', 'resolved', 'rejected', 'escalated');
       EXCEPTION
         WHEN duplicate_object THEN null;
       END $$;
     `);
 
-    // status — defaults to 'pending' for all new and existing rows
+    await queryRunner.query(`
+      ALTER TYPE "public"."reports_status_enum" ADD VALUE IF NOT EXISTS 'open'
+    `);
+    await queryRunner.query(`
+      ALTER TYPE "public"."reports_status_enum" ADD VALUE IF NOT EXISTS 'reviewing'
+    `);
+    await queryRunner.query(`
+      ALTER TYPE "public"."reports_status_enum" ADD VALUE IF NOT EXISTS 'rejected'
+    `);
+    await queryRunner.query(`
+      ALTER TYPE "public"."reports_status_enum" ADD VALUE IF NOT EXISTS 'escalated'
+    `);
+
+    // status — defaults to 'open' for all new and existing rows
     await queryRunner.query(`
       ALTER TABLE "reports"
         ADD COLUMN IF NOT EXISTS "status" "public"."reports_status_enum"
-        NOT NULL DEFAULT 'pending'
+        NOT NULL DEFAULT 'open'
+    `);
+    await queryRunner.query(`
+      UPDATE "reports"
+      SET "status" = CASE
+        WHEN "status"::text = 'pending' THEN 'open'::"public"."reports_status_enum"
+        WHEN "status"::text = 'dismissed' THEN 'rejected'::"public"."reports_status_enum"
+        ELSE "status"
+      END
+      WHERE "status"::text IN ('pending', 'dismissed')
+    `);
+    await queryRunner.query(`
+      ALTER TABLE "reports"
+        ALTER COLUMN "status" SET DEFAULT 'open'
     `);
 
     // resolved_by — FK to users.id, nulled out if the user is deleted

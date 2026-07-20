@@ -24,6 +24,7 @@ export enum AuditActionType {
   REPORT_CREATED = 'report_created',
   REPORT_RESOLVED = 'report_resolved',
   REPORT_DISMISSED = 'report_dismissed',
+  REPORT_STATUS_TRANSITION = 'report_status_transition',
 
   // Auth actions
   FAILED_LOGIN = 'failed_login',
@@ -61,8 +62,8 @@ export enum AuditActionType {
   EXPORT_GENERATION_COMPLETED = 'export_generation_completed',
   EXPORT_LINK_REFRESHED = 'export_link_refreshed',
   EXPORT_DOWNLOADED = 'export_downloaded',
-  EXPORT_TOKEN_EXPIRED = 'export_token_expired',   // <-- ADDED
-  EXPORT_EXPIRED = 'export_expired',               // <-- ADDED
+  EXPORT_TOKEN_EXPIRED = 'export_token_expired', // <-- ADDED
+  EXPORT_EXPIRED = 'export_expired', // <-- ADDED
 
   // Admin CSV export actions initiated from the frontend
   ADMIN_CSV_EXPORT = 'admin_csv_export',

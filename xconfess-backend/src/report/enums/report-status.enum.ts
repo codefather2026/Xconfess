@@ -1,6 +1,7 @@
 export enum ReportStatus {
-  PENDING = 'PENDING',
-  REVIEWED = 'REVIEWED',
-  RESOLVED = 'RESOLVED',
-  REJECTED = 'REJECTED',
+  OPEN = 'open',
+  REVIEWING = 'reviewing',
+  RESOLVED = 'resolved',
+  REJECTED = 'rejected',
+  ESCALATED = 'escalated',
 }

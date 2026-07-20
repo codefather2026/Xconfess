@@ -6,6 +6,7 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { ReportsService } from './reports.service';
 import { ReportStatus, ReportType } from '../admin/entities/report.entity';
 import { AuditActionType } from '../audit-log/audit-log.entity';
+import { isValidReportStatusTransition } from './report-lifecycle';
 
 // Minimal stub factory for chained query-builder
 function makeQb(result: any = null) {
@@ -33,6 +34,9 @@ describe('ReportsService — idempotency & replay safety (#780)', () => {
 
   const auditLogService: any = {
     logReport: jest.fn().mockResolvedValue(undefined),
+    log: jest.fn().mockResolvedValue(undefined),
+    logReportDismissed: jest.fn().mockResolvedValue(undefined),
+    logReportResolved: jest.fn().mockResolvedValue(undefined),
   };
 
   beforeEach(() => {
@@ -53,7 +57,7 @@ describe('ReportsService — idempotency & replay safety (#780)', () => {
       confessionId: 'conf-1',
       reporterId: 42,
       idempotencyKey: 'idem-key-abc',
-      status: ReportStatus.PENDING,
+      status: ReportStatus.OPEN,
     };
 
     reportRepository.findOne.mockResolvedValue(existing);
@@ -107,38 +111,36 @@ describe('ReportsService — idempotency & replay safety (#780)', () => {
       id: 'rep-2',
       confessionId: 'conf-2',
       reporterId: 7,
-      status: ReportStatus.PENDING,
+      status: ReportStatus.OPEN,
     };
 
     // No idempotency key match
     reportRepository.findOne.mockResolvedValue(null);
 
     // Transaction mock that mimics the inner logic:
-    reportRepository.manager.transaction.mockImplementation(
-      async (cb: any) => {
-        const qb = makeQb(existingReport); // dedup check returns existing
-        const confessionRepo = {
-          findOne: jest
-            .fn()
-            .mockResolvedValue({ id: 'conf-2', anonymousUser: null }),
-        };
-        const reportRepo = {
-          createQueryBuilder: jest.fn().mockReturnValue(qb),
-          create: jest.fn(),
-          save: jest.fn(),
-        };
-        const outboxRepo = { save: jest.fn(), create: jest.fn() };
+    reportRepository.manager.transaction.mockImplementation(async (cb: any) => {
+      const qb = makeQb(existingReport); // dedup check returns existing
+      const confessionRepo = {
+        findOne: jest
+          .fn()
+          .mockResolvedValue({ id: 'conf-2', anonymousUser: null }),
+      };
+      const reportRepo = {
+        createQueryBuilder: jest.fn().mockReturnValue(qb),
+        create: jest.fn(),
+        save: jest.fn(),
+      };
+      const outboxRepo = { save: jest.fn(), create: jest.fn() };
 
-        return cb({
-          getRepository: (entity: any) => {
-            if (entity?.name === 'AnonymousConfession' || entity === Object)
-              return confessionRepo;
-            if (entity?.name === 'OutboxEvent') return outboxRepo;
-            return reportRepo;
-          },
-        });
-      },
-    );
+      return cb({
+        getRepository: (entity: any) => {
+          if (entity?.name === 'AnonymousConfession' || entity === Object)
+            return confessionRepo;
+          if (entity?.name === 'OutboxEvent') return outboxRepo;
+          return reportRepo;
+        },
+      });
+    });
 
     const result = await service.createReport(
       'conf-2',
@@ -156,41 +158,37 @@ describe('ReportsService — idempotency & replay safety (#780)', () => {
       id: 'rep-3',
       confessionId: 'conf-3',
       anonymousReporterId: 'anon-456',
-      status: ReportStatus.PENDING,
+      status: ReportStatus.OPEN,
     };
 
     reportRepository.findOne.mockResolvedValue(null); // no idem-key match
 
-    reportRepository.manager.transaction.mockImplementation(
-      async (cb: any) => {
-        const qb = makeQb(existingReport);
-        const confessionRepo = {
-          findOne: jest
-            .fn()
-            .mockResolvedValue({ id: 'conf-3', anonymousUser: null }),
-        };
-        const reportRepo = {
-          createQueryBuilder: jest.fn().mockReturnValue(qb),
-          create: jest.fn(),
-          save: jest.fn(),
-        };
-        const outboxRepo = { save: jest.fn(), create: jest.fn() };
-        return cb({
-          getRepository: () => reportRepo,
-          // Provide per-entity routing if needed
-        });
-      },
-    );
+    reportRepository.manager.transaction.mockImplementation(async (cb: any) => {
+      const qb = makeQb(existingReport);
+      const confessionRepo = {
+        findOne: jest
+          .fn()
+          .mockResolvedValue({ id: 'conf-3', anonymousUser: null }),
+      };
+      const reportRepo = {
+        createQueryBuilder: jest.fn().mockReturnValue(qb),
+        create: jest.fn(),
+        save: jest.fn(),
+      };
+      const outboxRepo = { save: jest.fn(), create: jest.fn() };
+      return cb({
+        getRepository: () => reportRepo,
+        // Provide per-entity routing if needed
+      });
+    });
 
     // Manually test the logic path by calling inner callback
     // (simplified mock — full integration tested in e2e)
     // We just verify the service doesn't throw for the duplicate case
     // by using a more direct transaction mock:
-    reportRepository.manager.transaction.mockImplementation(
-      async (cb: any) => {
-        return existingReport; // short-circuit for this test
-      },
-    );
+    reportRepository.manager.transaction.mockImplementation(async (cb: any) => {
+      return existingReport; // short-circuit for this test
+    });
 
     const result = await service.createReport(
       'conf-3',
@@ -208,7 +206,7 @@ describe('ReportsService — idempotency & replay safety (#780)', () => {
     // Based on the controller code, it throws before calling the service.
     // However, for issue #1012 we need to ensure tests cover this.
     // Let's add a test case that would mimic the controller's logic or verify service behavior.
-    
+
     const confessionId = 'conf-123';
     const reporterId = null;
     const dto = { type: ReportType.SPAM };
@@ -216,12 +214,12 @@ describe('ReportsService — idempotency & replay safety (#780)', () => {
 
     // If the service doesn't have a check, it might fail elsewhere or succeed unexpectedly.
     // The requirement is to validate that it cannot bypass identity requirements.
-    
+
     // We will verify the controller handles this or add a check in the service if appropriate.
     // For now, let's add a test for the service to ensure it handles null reporter safely.
-    
+
     await expect(
-      service.createReport(confessionId, reporterId, dto, context)
+      service.createReport(confessionId, reporterId, dto, context),
     ).rejects.toThrow();
   });
 
@@ -232,16 +230,14 @@ describe('ReportsService — idempotency & replay safety (#780)', () => {
       id: 'rep-new',
       confessionId: 'conf-4',
       reporterId: 99,
-      status: ReportStatus.PENDING,
+      status: ReportStatus.OPEN,
     };
 
     reportRepository.findOne.mockResolvedValue(null);
 
-    reportRepository.manager.transaction.mockImplementation(
-      async (cb: any) => {
-        return newReport;
-      },
-    );
+    reportRepository.manager.transaction.mockImplementation(async (cb: any) => {
+      return newReport;
+    });
 
     const result = await service.createReport(
       'conf-4',
@@ -251,6 +247,142 @@ describe('ReportsService — idempotency & replay safety (#780)', () => {
     );
 
     expect(result).toBe(newReport);
+  });
+});
+
+describe('ReportsService — report status lifecycle (#1458)', () => {
+  const statuses = [
+    ReportStatus.OPEN,
+    ReportStatus.REVIEWING,
+    ReportStatus.RESOLVED,
+    ReportStatus.REJECTED,
+    ReportStatus.ESCALATED,
+  ];
+
+  const validTransitions = new Set([
+    `${ReportStatus.OPEN}->${ReportStatus.REVIEWING}`,
+    `${ReportStatus.OPEN}->${ReportStatus.RESOLVED}`,
+    `${ReportStatus.OPEN}->${ReportStatus.REJECTED}`,
+    `${ReportStatus.OPEN}->${ReportStatus.ESCALATED}`,
+    `${ReportStatus.REVIEWING}->${ReportStatus.RESOLVED}`,
+    `${ReportStatus.REVIEWING}->${ReportStatus.REJECTED}`,
+    `${ReportStatus.REVIEWING}->${ReportStatus.ESCALATED}`,
+    `${ReportStatus.ESCALATED}->${ReportStatus.REVIEWING}`,
+    `${ReportStatus.ESCALATED}->${ReportStatus.RESOLVED}`,
+    `${ReportStatus.ESCALATED}->${ReportStatus.REJECTED}`,
+  ]);
+
+  it.each(
+    statuses.flatMap((from) =>
+      statuses.map((to) => [from, to, validTransitions.has(`${from}->${to}`)]),
+    ),
+  )(
+    'validates %s -> %s as %s',
+    (from: ReportStatus, to: ReportStatus, expected: boolean) => {
+      expect(isValidReportStatusTransition(from, to)).toBe(expected);
+    },
+  );
+
+  it('records actor and reason when a valid transition is applied', async () => {
+    const report = {
+      id: 'rep-transition',
+      confessionId: 'conf-transition',
+      status: ReportStatus.OPEN,
+      resolvedBy: null,
+      resolvedAt: null,
+      resolutionNotes: null,
+    };
+    const reportRepository: any = {
+      findOne: jest.fn().mockResolvedValue(report),
+      save: jest.fn().mockImplementation(async (saved: any) => saved),
+    };
+    const auditLogService: any = {
+      log: jest.fn().mockResolvedValue(undefined),
+      logReportResolved: jest.fn().mockResolvedValue(undefined),
+      logReportDismissed: jest.fn().mockResolvedValue(undefined),
+    };
+    const service = new ReportsService(
+      reportRepository,
+      {},
+      {},
+      auditLogService,
+    );
+
+    const result = await service.actionReport(
+      report.id,
+      { id: 42, username: 'admin-user', role: 'admin' } as any,
+      { action: 'reviewing', note: 'Needs moderator review' },
+      { ipAddress: '127.0.0.1', userAgent: 'jest' },
+    );
+
+    expect(result.status).toBe(ReportStatus.REVIEWING);
+    expect(result.resolvedBy).toBe(42);
+    expect(result.resolutionNotes).toBe('Needs moderator review');
+    expect(reportRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: ReportStatus.REVIEWING,
+        resolvedBy: 42,
+        resolutionNotes: 'Needs moderator review',
+      }),
+    );
+    expect(auditLogService.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionType: AuditActionType.REPORT_STATUS_TRANSITION,
+        metadata: expect.objectContaining({
+          reportId: report.id,
+          from: ReportStatus.OPEN,
+          to: ReportStatus.REVIEWING,
+          reason: 'Needs moderator review',
+          actorId: 42,
+          actorName: 'admin-user',
+        }),
+        context: expect.objectContaining({
+          userId: 42,
+          actor: expect.objectContaining({ type: 'admin', id: '42' }),
+        }),
+      }),
+    );
+  });
+
+  it('rejects invalid transitions with a normalized error and no audit', async () => {
+    const report = {
+      id: 'rep-invalid',
+      confessionId: 'conf-invalid',
+      status: ReportStatus.RESOLVED,
+    };
+    const reportRepository: any = {
+      findOne: jest.fn().mockResolvedValue(report),
+      save: jest.fn(),
+    };
+    const auditLogService: any = {
+      log: jest.fn().mockResolvedValue(undefined),
+      logReportResolved: jest.fn().mockResolvedValue(undefined),
+      logReportDismissed: jest.fn().mockResolvedValue(undefined),
+    };
+    const service = new ReportsService(
+      reportRepository,
+      {},
+      {},
+      auditLogService,
+    );
+
+    await expect(
+      service.actionReport(
+        report.id,
+        { id: 42, username: 'admin-user', role: 'admin' } as any,
+        { action: 'escalated', note: 'Impossible move' },
+      ),
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({
+        code: 'INVALID_REPORT_STATUS_TRANSITION',
+        from: ReportStatus.RESOLVED,
+        to: ReportStatus.ESCALATED,
+        allowedTransitions: [],
+      }),
+    });
+
+    expect(reportRepository.save).not.toHaveBeenCalled();
+    expect(auditLogService.log).not.toHaveBeenCalled();
   });
 });
 

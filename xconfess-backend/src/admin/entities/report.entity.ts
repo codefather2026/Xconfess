@@ -22,10 +22,13 @@ export enum ReportType {
 }
 
 export enum ReportStatus {
-  PENDING = 'pending',
+  OPEN = 'open',
   REVIEWING = 'reviewing',
+  ESCALATED = 'escalated',
   RESOLVED = 'resolved',
-  DISMISSED = 'dismissed',
+  REJECTED = 'rejected',
+  PENDING = 'open',
+  DISMISSED = 'rejected',
 }
 
 @Entity('reports')
@@ -70,7 +73,7 @@ export class Report {
   @Column({
     type: 'enum',
     enum: ReportStatus,
-    default: ReportStatus.PENDING,
+    default: ReportStatus.OPEN,
   })
   status: ReportStatus;
 
