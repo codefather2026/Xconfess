@@ -3,7 +3,22 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, Repository } from 'typeorm';
 import { ModerationLog } from './entities/moderation-log.entity';
-import { ModerationResult, ModerationStatus } from './ai-moderation.service';
+import {
+  buildSafeModerationExcerpt,
+  ModerationResult,
+  ModerationStatus,
+} from './ai-moderation.service';
+
+export interface ModerationEvidence {
+  score: number;
+  confidence: number;
+  categories: string[];
+  reasonCodes: string[];
+  model: string | null;
+  modelVersion: string | null;
+  safeExcerpt: string | null;
+  status: ModerationStatus;
+}
 
 @Injectable()
 export class ModerationRepositoryService {
@@ -28,11 +43,16 @@ export class ModerationRepositoryService {
     const log = repo.create({
       confessionId,
       userId,
-      content: content.substring(0, 5000),
+      content: buildSafeModerationExcerpt(content, 1000),
       moderationScore: result.score,
+      confidence: result.confidence ?? result.score,
       moderationFlags: result.flags,
+      reasonCodes: result.reasonCodes ?? this.buildReasonCodes(result.details),
       moderationStatus: result.status,
       details: result.details,
+      model: result.model ?? apiProvider ?? 'fallback',
+      modelVersion: result.modelVersion ?? 'unknown',
+      safeExcerpt: result.safeExcerpt ?? buildSafeModerationExcerpt(content),
       requiresReview: result.requiresReview,
       autoActioned: result.status !== ModerationStatus.PENDING,
       apiProvider: apiProvider || 'fallback',
@@ -74,15 +94,22 @@ export class ModerationRepositoryService {
       repo.create({
         confessionId: params.confessionId,
         userId: params.userId,
-        content: params.content.substring(0, 5000),
+        content: buildSafeModerationExcerpt(params.content, 1000),
       });
 
     log.userId = params.userId ?? '';
-    log.content = params.content.substring(0, 5000);
+    log.content = buildSafeModerationExcerpt(params.content, 1000);
     log.moderationScore = params.result.score;
+    log.confidence = params.result.confidence ?? params.result.score;
     log.moderationFlags = params.result.flags;
+    log.reasonCodes =
+      params.result.reasonCodes ?? this.buildReasonCodes(params.result.details);
     log.moderationStatus = params.result.status;
     log.details = params.result.details;
+    log.model = params.result.model ?? 'webhook';
+    log.modelVersion = params.result.modelVersion ?? 'unknown';
+    log.safeExcerpt =
+      params.result.safeExcerpt ?? buildSafeModerationExcerpt(params.content);
     log.requiresReview = params.result.requiresReview;
     log.autoActioned = params.result.status !== ModerationStatus.PENDING;
     log.apiProvider = 'webhook';
@@ -102,6 +129,52 @@ export class ModerationRepositoryService {
       log: await repo.save(log),
       isIdempotent: false,
     };
+  }
+
+  async getLatestEvidenceByConfessionIds(
+    confessionIds: string[],
+  ): Promise<Map<string, ModerationEvidence>> {
+    if (confessionIds.length === 0) {
+      return new Map();
+    }
+
+    const logs = await this.moderationLogRepo
+      .createQueryBuilder('log')
+      .where('log.confessionId IN (:...confessionIds)', { confessionIds })
+      .orderBy('log.confessionId', 'ASC')
+      .addOrderBy('log.createdAt', 'DESC')
+      .getMany();
+
+    const evidence = new Map<string, ModerationEvidence>();
+    for (const log of logs) {
+      if (!log.confessionId || evidence.has(log.confessionId)) {
+        continue;
+      }
+      evidence.set(log.confessionId, this.toEvidence(log));
+    }
+
+    return evidence;
+  }
+
+  private toEvidence(log: ModerationLog): ModerationEvidence {
+    return {
+      score: Number(log.moderationScore ?? 0),
+      confidence: Number(log.confidence ?? log.moderationScore ?? 0),
+      categories: log.moderationFlags ?? [],
+      reasonCodes: log.reasonCodes ?? this.buildReasonCodes(log.details ?? {}),
+      model: log.model ?? null,
+      modelVersion: log.modelVersion ?? null,
+      safeExcerpt:
+        log.safeExcerpt ?? buildSafeModerationExcerpt(log.content ?? ''),
+      status: log.moderationStatus,
+    };
+  }
+
+  private buildReasonCodes(details: Record<string, number> | null): string[] {
+    return Object.entries(details ?? {})
+      .filter(([, score]) => score > 0)
+      .sort(([, left], [, right]) => right - left)
+      .map(([category, score]) => `${category}:${Number(score).toFixed(4)}`);
   }
 
   async updateReview(

@@ -16,6 +16,7 @@ import * as crypto from 'crypto';
 import { Repository } from 'typeorm';
 import { AnonymousConfession } from '../confession/entities/confession.entity';
 import {
+  buildSafeModerationExcerpt,
   ModerationCategory,
   ModerationResult,
   ModerationStatus,
@@ -28,6 +29,11 @@ interface WebhookPayload {
   moderationFlags: string[];
   moderationStatus: ModerationStatus;
   details: Record<string, number>;
+  confidence?: number;
+  reasonCodes?: string[];
+  model?: string;
+  modelVersion?: string;
+  safeExcerpt?: string;
   timestamp: string;
 }
 
@@ -85,24 +91,29 @@ export class ModerationWebhookController {
     if (ageSeconds > this.timestampToleranceSeconds) {
       // Audit stale but signed request and reject
       try {
-        await this.moderationRepoService.syncWebhookResult(
-          {
-            confessionId: payload.confessionId ?? '',
-            content: serializedPayload,
-            result: {
-              score: payload.moderationScore ?? 0,
-              flags: (payload.moderationFlags ?? []) as ModerationCategory[],
-              status: payload.moderationStatus ?? ModerationStatus.PENDING,
-              details: payload.details ?? {},
-              requiresReview: false,
-            },
-            deliveryHash: this.buildDeliveryHash(serializedPayload),
-            deliveryTimestamp: payload.timestamp,
-            signatureValid: this.verifySignature(serializedPayload, signature),
-            payloadMalformed: false,
-            deliveryStale: true,
+        await this.moderationRepoService.syncWebhookResult({
+          confessionId: payload.confessionId ?? '',
+          content: serializedPayload,
+          result: {
+            score: payload.moderationScore ?? 0,
+            flags: (payload.moderationFlags ?? []) as ModerationCategory[],
+            status: payload.moderationStatus ?? ModerationStatus.PENDING,
+            details: payload.details ?? {},
+            confidence: payload.confidence ?? payload.moderationScore ?? 0,
+            reasonCodes:
+              payload.reasonCodes ??
+              this.buildReasonCodes(payload.details ?? {}),
+            model: payload.model ?? 'webhook',
+            modelVersion: payload.modelVersion ?? 'unknown',
+            safeExcerpt: buildSafeModerationExcerpt(serializedPayload),
+            requiresReview: false,
           },
-        );
+          deliveryHash: this.buildDeliveryHash(serializedPayload),
+          deliveryTimestamp: payload.timestamp,
+          signatureValid: this.verifySignature(serializedPayload, signature),
+          payloadMalformed: false,
+          deliveryStale: true,
+        });
       } catch (e) {
         this.logger.error('Failed to audit stale webhook', e as any);
       }
@@ -120,7 +131,9 @@ export class ModerationWebhookController {
     // Validate payload structure
     if (!payload.confessionId || !payload.moderationStatus) {
       this.logger.error('Malformed moderation webhook payload', { payload });
-      throw new BadRequestException('Malformed payload: missing required fields');
+      throw new BadRequestException(
+        'Malformed payload: missing required fields',
+      );
     }
 
     const requiresReview =
@@ -128,9 +141,15 @@ export class ModerationWebhookController {
     const shouldHide = payload.moderationStatus === ModerationStatus.REJECTED;
     const moderationResult: ModerationResult = {
       score: payload.moderationScore,
+      confidence: payload.confidence ?? payload.moderationScore,
       flags: payload.moderationFlags as ModerationCategory[],
       status: payload.moderationStatus,
       details: payload.details,
+      reasonCodes:
+        payload.reasonCodes ?? this.buildReasonCodes(payload.details),
+      model: payload.model ?? 'webhook',
+      modelVersion: payload.modelVersion ?? 'unknown',
+      safeExcerpt: payload.safeExcerpt ?? undefined,
       requiresReview,
     };
     const deliveryHash = this.buildDeliveryHash(serializedPayload);
@@ -226,6 +245,13 @@ export class ModerationWebhookController {
 
   private buildDeliveryHash(payload: string): string {
     return crypto.createHash('sha256').update(payload).digest('hex');
+  }
+
+  private buildReasonCodes(details: Record<string, number> | null): string[] {
+    return Object.entries(details ?? {})
+      .filter(([, score]) => score > 0)
+      .sort(([, left], [, right]) => right - left)
+      .map(([category, score]) => `${category}:${Number(score).toFixed(4)}`);
   }
 
   private verifySignature(payload: string, signature: string): boolean {

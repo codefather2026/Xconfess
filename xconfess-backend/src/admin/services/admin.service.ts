@@ -6,7 +6,7 @@
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, In, Repository, LessThan } from 'typeorm';
-import { Report, ReportStatus, ReportType } from '../entities/report.entity'
+import { Report, ReportStatus, ReportType } from '../entities/report.entity';
 import { AnonymousConfession } from '../../confession/entities/confession.entity';
 import { User, UserRole } from '../../user/entities/user.entity';
 import { ModerationService } from './moderation.service';
@@ -21,6 +21,8 @@ import { Tip } from '../../tipping/entities/tip.entity';
 import { AuditLogService } from '../../audit-log/audit-log.service';
 import { JobManagementService } from '../../notifications/services/job-management.service';
 import { LockoutService } from '../../auth/lockout.service';
+import { ModerationLog } from '../../moderation/entities/moderation-log.entity';
+import { buildSafeModerationExcerpt } from '../../moderation/ai-moderation.service';
 
 export interface BulkResolveOutcome {
   id: string;
@@ -56,6 +58,67 @@ export class AdminService {
     }
   }
 
+  private async getModerationEvidenceForReports(
+    reports: Report[],
+  ): Promise<Map<string, Record<string, unknown>>> {
+    const confessionIds = Array.from(
+      new Set(reports.map((report) => report.confessionId).filter(Boolean)),
+    );
+
+    if (confessionIds.length === 0) {
+      return new Map();
+    }
+
+    const logs = await this.moderationLogRepository
+      .createQueryBuilder('log')
+      .where('log.confessionId IN (:...confessionIds)', { confessionIds })
+      .orderBy('log.confessionId', 'ASC')
+      .addOrderBy('log.createdAt', 'DESC')
+      .getMany();
+
+    const evidence = new Map<string, Record<string, unknown>>();
+    for (const log of logs) {
+      if (!log.confessionId || evidence.has(log.confessionId)) {
+        continue;
+      }
+
+      evidence.set(log.confessionId, {
+        score: Number(log.moderationScore ?? 0),
+        confidence: Number(log.confidence ?? log.moderationScore ?? 0),
+        categories: log.moderationFlags ?? [],
+        reasonCodes:
+          log.reasonCodes ?? this.buildModerationReasonCodes(log.details),
+        model: log.model ?? null,
+        modelVersion: log.modelVersion ?? null,
+        safeExcerpt:
+          log.safeExcerpt ?? buildSafeModerationExcerpt(log.content ?? ''),
+        status: log.moderationStatus,
+        createdAt: log.createdAt,
+      });
+    }
+
+    return evidence;
+  }
+
+  private withModerationEvidence<T extends Report>(
+    report: T,
+    evidence: Map<string, Record<string, unknown>>,
+  ): T & { moderationEvidence?: Record<string, unknown> | null } {
+    return {
+      ...report,
+      moderationEvidence: evidence.get(report.confessionId) ?? null,
+    };
+  }
+
+  private buildModerationReasonCodes(
+    details: Record<string, number> | null,
+  ): string[] {
+    return Object.entries(details ?? {})
+      .filter(([, score]) => score > 0)
+      .sort(([, left], [, right]) => right - left)
+      .map(([category, score]) => `${category}:${Number(score).toFixed(4)}`);
+  }
+
   constructor(
     @InjectRepository(Report)
     private readonly reportRepository: Repository<Report>,
@@ -67,6 +130,8 @@ export class AdminService {
     private readonly userAnonRepository: Repository<UserAnonymousUser>,
     @InjectRepository(Tip)
     private readonly tipRepository: Repository<Tip>,
+    @InjectRepository(ModerationLog)
+    private readonly moderationLogRepository: Repository<ModerationLog>,
     private readonly moderationService: ModerationService,
     private readonly moderationTemplateService: ModerationTemplateService,
     private readonly configService: ConfigService,
@@ -121,13 +186,14 @@ export class AdminService {
     }
 
     const [reports, total] = await query.getManyAndCount();
+    const evidence = await this.getModerationEvidenceForReports(reports);
     const mapped = reports.map((r) => {
       if (r.confession?.message) {
         r.confession.message = this.safeDecryptConfessionMessage(
           r.confession.message,
         );
       }
-      return r;
+      return this.withModerationEvidence(r, evidence);
     });
     return [mapped, total] as const;
   }
@@ -147,7 +213,8 @@ export class AdminService {
         report.confession.message,
       );
     }
-    return report;
+    const evidence = await this.getModerationEvidenceForReports([report]);
+    return this.withModerationEvidence(report, evidence);
   }
 
   async resolveReport(
@@ -829,7 +896,9 @@ export class AdminService {
     limit = 20,
     cursor?: string,
   ): Promise<CursorPaginatedResponseDto<Report>> {
-    const parsedCursor = decodeCursor<{ id: string; createdAt: string }>(cursor);
+    const parsedCursor = decodeCursor<{ id: string; createdAt: string }>(
+      cursor,
+    );
     const take = Math.min(limit + 1, PAGINATION.MAX_LIMIT);
 
     const query = this.reportRepository
@@ -868,16 +937,23 @@ export class AdminService {
     const hasMore = reports.length > limit;
     if (hasMore) reports.pop();
 
+    const evidence = await this.getModerationEvidenceForReports(reports);
     const mapped = reports.map((r) => {
       if (r.confession?.message) {
-        r.confession.message = this.safeDecryptConfessionMessage(r.confession.message);
+        r.confession.message = this.safeDecryptConfessionMessage(
+          r.confession.message,
+        );
       }
-      return r;
+      return this.withModerationEvidence(r, evidence);
     });
 
-    const nextCursor = hasMore && reports.length > 0
-      ? encodeCursor({ id: reports[reports.length - 1].id, createdAt: reports[reports.length - 1].createdAt.toISOString() })
-      : null;
+    const nextCursor =
+      hasMore && reports.length > 0
+        ? encodeCursor({
+            id: reports[reports.length - 1].id,
+            createdAt: reports[reports.length - 1].createdAt.toISOString(),
+          })
+        : null;
 
     return new CursorPaginatedResponseDto(mapped, nextCursor, hasMore, limit);
   }
@@ -887,7 +963,9 @@ export class AdminService {
     limit = 20,
     cursor?: string,
   ): Promise<CursorPaginatedResponseDto<User>> {
-    const parsedCursor = decodeCursor<{ id: number; createdAt: string }>(cursor);
+    const parsedCursor = decodeCursor<{ id: number; createdAt: string }>(
+      cursor,
+    );
     const take = Math.min(limit + 1, PAGINATION.MAX_LIMIT);
 
     const qb = this.userRepository
@@ -911,9 +989,13 @@ export class AdminService {
     const hasMore = users.length > limit;
     if (hasMore) users.pop();
 
-    const nextCursor = hasMore && users.length > 0
-      ? encodeCursor({ id: users[users.length - 1].id, createdAt: users[users.length - 1].createdAt.toISOString() })
-      : null;
+    const nextCursor =
+      hasMore && users.length > 0
+        ? encodeCursor({
+            id: users[users.length - 1].id,
+            createdAt: users[users.length - 1].createdAt.toISOString(),
+          })
+        : null;
 
     return new CursorPaginatedResponseDto(users, nextCursor, hasMore, limit);
   }

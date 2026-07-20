@@ -24,8 +24,14 @@ export class ModerationLog {
   @Column('decimal', { precision: 5, scale: 4 })
   moderationScore: number;
 
+  @Column('decimal', { precision: 5, scale: 4, default: 0 })
+  confidence: number;
+
   @Column('simple-array')
   moderationFlags: ModerationCategory[];
+
+  @Column('simple-array', { name: 'reason_codes', nullable: true })
+  reasonCodes: string[];
 
   @Column({
     type: 'enum',
@@ -36,6 +42,15 @@ export class ModerationLog {
 
   @Column('json', { nullable: true })
   details: Record<string, number>;
+
+  @Column({ name: 'model_name', nullable: true })
+  model: string;
+
+  @Column({ name: 'model_version', nullable: true })
+  modelVersion: string;
+
+  @Column('text', { name: 'safe_excerpt', nullable: true })
+  safeExcerpt: string;
 
   @Column({ default: false })
   requiresReview: boolean;

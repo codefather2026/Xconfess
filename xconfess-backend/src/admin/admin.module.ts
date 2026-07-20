@@ -28,6 +28,7 @@ import { NotificationTemplate } from '../database/entities/notification-template
 import { TemplateVersion } from '../database/entities/template-version.entity';
 import { NotificationTemplatesController } from './controllers/notification-templates.controller';
 import { TemplatesService } from './services/templates.service';
+import { ModerationLog } from '../moderation/entities/moderation-log.entity';
 
 @Module({
   imports: [
@@ -39,8 +40,9 @@ import { TemplatesService } from './services/templates.service';
       User,
       UserAnonymousUser,
       Tip,
+      ModerationLog,
       NotificationTemplate, // Added
-      TemplateVersion,      // Added
+      TemplateVersion, // Added
     ]),
     AuthModule,
     UserModule,
@@ -65,9 +67,9 @@ import { TemplatesService } from './services/templates.service';
     TemplatesService, // Added
   ],
   exports: [
-    AdminService, 
-    ModerationService, 
-    ModerationTemplateService, 
+    AdminService,
+    ModerationService,
+    ModerationTemplateService,
     TemplatesService, // Added
   ],
 })

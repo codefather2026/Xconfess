@@ -20,7 +20,9 @@ export default function ReportList() {
   const limit = 20;
 
   const queryClient = useQueryClient();
-  const { triggerExport, isExporting: isExportingCsv } = useExportCSV({ label: 'reports' });
+  const { triggerExport, isExporting: isExportingCsv } = useExportCSV({
+    label: "reports",
+  });
   const { openConfirmation, confirmDialog } = useAdminConfirmation();
 
   const reportListKey = queryKeys.admin.reports.list({
@@ -45,10 +47,15 @@ export default function ReportList() {
   });
 
   const bulkResolveMutation = useMutation({
-    mutationFn: ({ ids }: { ids: string[] }) => adminApi.bulkResolveReports(ids),
+    mutationFn: ({ ids }: { ids: string[] }) =>
+      adminApi.bulkResolveReports(ids),
     onMutate: async ({ ids }) => {
-      await queryClient.cancelQueries({ queryKey: queryKeys.admin.reports.all() });
-      const snapshots = queryClient.getQueriesData({ queryKey: queryKeys.admin.reports.all() });
+      await queryClient.cancelQueries({
+        queryKey: queryKeys.admin.reports.all(),
+      });
+      const snapshots = queryClient.getQueriesData({
+        queryKey: queryKeys.admin.reports.all(),
+      });
       queryClient.setQueriesData(
         { queryKey: queryKeys.admin.reports.all() },
         (old: any) => {
@@ -69,7 +76,9 @@ export default function ReportList() {
       });
     },
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.admin.reports.all() });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.admin.reports.all(),
+      });
     },
   });
 
@@ -89,12 +98,12 @@ export default function ReportList() {
     if (selectedIds.size === 0) return;
     const reportIds = Array.from(selectedIds);
     openConfirmation({
-      title: 'Resolve selected reports?',
+      title: "Resolve selected reports?",
       description: `This will mark ${reportIds.length} selected reports as resolved.`,
-      confirmLabel: 'Resolve',
+      confirmLabel: "Resolve",
       action: () => bulkResolveMutation.mutateAsync({ ids: reportIds }),
-      successMessage: 'Selected reports resolved.',
-      errorMessage: 'Failed to resolve selected reports.',
+      successMessage: "Selected reports resolved.",
+      errorMessage: "Failed to resolve selected reports.",
       onSuccess: () => {
         setSelectedIds(new Set());
       },
@@ -107,23 +116,30 @@ export default function ReportList() {
     );
   }
 
-
   const reports = data?.reports || [];
   const total = data?.total || 0;
   const totalPages = Math.ceil(total / limit);
 
   const isFilterActive =
-    statusFilter !== 'all' || typeFilter !== 'all' || startDate !== '' || endDate !== '';
+    statusFilter !== "all" ||
+    typeFilter !== "all" ||
+    startDate !== "" ||
+    endDate !== "";
 
   const statusClassMap: Record<string, string> = {
     pending:
-      'px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800 dark:bg-yellow-800 dark:text-yellow-100',
+      "px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800 dark:bg-yellow-800 dark:text-yellow-100",
+    open: "px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800 dark:bg-yellow-800 dark:text-yellow-100",
     reviewing:
-      'px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800 dark:bg-blue-800 dark:text-blue-100',
+      "px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800 dark:bg-blue-800 dark:text-blue-100",
+    escalated:
+      "px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800 dark:bg-red-800 dark:text-red-100",
     resolved:
-      'px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-100',
+      "px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-100",
+    rejected:
+      "px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200",
     dismissed:
-      'px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200',
+      "px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200",
   };
 
   const humanizeStatus = (s: string) => {
@@ -164,10 +180,11 @@ export default function ReportList() {
               className="w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-700 dark:text-white"
             >
               <option value="all">All</option>
-              <option value="pending">Pending</option>
+              <option value="open">Open</option>
               <option value="reviewing">Reviewing</option>
+              <option value="escalated">Escalated</option>
               <option value="resolved">Resolved</option>
-              <option value="dismissed">Dismissed</option>
+              <option value="rejected">Rejected</option>
             </select>
           </div>
           <div>
@@ -224,17 +241,24 @@ export default function ReportList() {
           <div className="flex flex-wrap items-end gap-2">
             <ExportCsvButton
               onClick={() => {
-                const exportData: Record<string, unknown>[] = reports.map((r: Report) => ({
-                  id: r.id,
-                  type: r.type,
-                  status: r.status,
-                  reporter: r.reporter?.username || "Anonymous",
-                  reason: r.reason || "",
-                  createdAt: new Date(r.createdAt).toLocaleString(),
-                  resolvedAt: r.resolvedAt
-                    ? new Date(r.resolvedAt).toLocaleString()
-                    : "",
-                }));
+                const exportData: Record<string, unknown>[] = reports.map(
+                  (r: Report) => ({
+                    id: r.id,
+                    type: r.type,
+                    status: r.status,
+                    reporter: r.reporter?.username || "Anonymous",
+                    reason: r.reason || "",
+                    createdAt: new Date(r.createdAt).toLocaleString(),
+                    resolvedAt: r.resolvedAt
+                      ? new Date(r.resolvedAt).toLocaleString()
+                      : "",
+                    moderationConfidence:
+                      r.moderationEvidence?.confidence ?? "",
+                    moderationReasonCodes:
+                      r.moderationEvidence?.reasonCodes?.join("|") ?? "",
+                    moderationModel: r.moderationEvidence?.model ?? "",
+                  }),
+                );
                 triggerExport(
                   exportData,
                   `reports-${new Date().toISOString().split("T")[0]}.csv`,
@@ -263,17 +287,21 @@ export default function ReportList() {
       {/* Empty state when filters match nothing */}
       {!isLoading && reports.length === 0 && isFilterActive ? (
         <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-8 text-center">
-          <p className="text-lg font-medium text-gray-900 dark:text-white">No reports match your filters</p>
-          <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">Try clearing filters to see all reports.</p>
+          <p className="text-lg font-medium text-gray-900 dark:text-white">
+            No reports match your filters
+          </p>
+          <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
+            Try clearing filters to see all reports.
+          </p>
           <div className="mt-4 flex justify-center">
             <Button
               variant="default"
               size="sm"
               onClick={() => {
-                setStatusFilter('all');
-                setTypeFilter('all');
-                setStartDate('');
-                setEndDate('');
+                setStatusFilter("all");
+                setTypeFilter("all");
+                setStartDate("");
+                setEndDate("");
                 setPage(1);
               }}
             >
@@ -284,86 +312,121 @@ export default function ReportList() {
       ) : (
         <div className="min-w-0 max-w-full overflow-hidden rounded-lg bg-white shadow dark:bg-gray-800">
           <div className="max-w-full overflow-x-auto overscroll-x-contain">
-            <table className="min-w-[48rem] divide-y divide-gray-200 dark:divide-gray-700 md:min-w-full">
-            <thead className="bg-gray-50 dark:bg-gray-700">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                  <input
-                    type="checkbox"
-                    aria-label="Select all reports"
-                    onChange={(e) => {
-                      if (e.target.checked) {
-                        setSelectedIds(new Set(reports.map((r: Report) => r.id)));
-                      } else {
-                        setSelectedIds(new Set());
-                      }
-                    }}
-                    className="rounded border-gray-300"
-                  />
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                  Type
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                  Status
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                  Reporter
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                  Created
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider sticky right-0 bg-gray-50 dark:bg-gray-700 after:absolute after:inset-y-0 after:left-0 after:w-px after:bg-gray-300 dark:after:bg-gray-600">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-              {reports.map((report: Report) => (
-                <tr
-                  key={report.id}
-                  className="hover:bg-gray-50 dark:hover:bg-gray-700"
-                >
-                  <td className="px-6 py-4 whitespace-nowrap">
+            <table className="min-w-[64rem] divide-y divide-gray-200 dark:divide-gray-700 md:min-w-full">
+              <thead className="bg-gray-50 dark:bg-gray-700">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                     <input
                       type="checkbox"
-                      aria-label={`Select report ${report.id}`}
-                      checked={selectedIds.has(report.id)}
-                      onChange={() => toggleSelect(report.id)}
-                      className="min-h-[44px] min-w-[44px] rounded border-gray-300"
+                      aria-label="Select all reports"
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedIds(
+                            new Set(reports.map((r: Report) => r.id)),
+                          );
+                        } else {
+                          setSelectedIds(new Set());
+                        }
+                      }}
+                      className="rounded border-gray-300"
                     />
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
-                    {report.type}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span className={statusClassMap[report.status] ?? statusClassMap['dismissed']}>
-                      {humanizeStatus(report.status)}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                    {report.reporter?.username || "Anonymous"}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                    {new Date(report.createdAt).toLocaleDateString()}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium sticky right-0 bg-white dark:bg-gray-800 after:absolute after:inset-y-0 after:left-0 after:w-px after:bg-gray-200 dark:after:bg-gray-700">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setSelectedReport(report.id)}
-                      aria-label={`View report ${report.id}`}
-                      className="min-h-[44px] min-w-[44px] rounded-md px-3 text-indigo-600 hover:text-indigo-900 dark:text-indigo-400 dark:hover:text-indigo-300"
-                    >
-                      View
-                    </Button>
-                  </td>
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                    Type
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                    Status
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                    Reporter
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                    Moderation
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                    Created
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider sticky right-0 bg-gray-50 dark:bg-gray-700 after:absolute after:inset-y-0 after:left-0 after:w-px after:bg-gray-300 dark:after:bg-gray-600">
+                    Actions
+                  </th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                {reports.map((report: Report) => (
+                  <tr
+                    key={report.id}
+                    className="hover:bg-gray-50 dark:hover:bg-gray-700"
+                  >
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <input
+                        type="checkbox"
+                        aria-label={`Select report ${report.id}`}
+                        checked={selectedIds.has(report.id)}
+                        onChange={() => toggleSelect(report.id)}
+                        className="min-h-[44px] min-w-[44px] rounded border-gray-300"
+                      />
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
+                      {report.type}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span
+                        className={
+                          statusClassMap[report.status] ??
+                          statusClassMap["dismissed"]
+                        }
+                      >
+                        {humanizeStatus(report.status)}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                      {report.reporter?.username || "Anonymous"}
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-500 dark:text-gray-400">
+                      {report.moderationEvidence ? (
+                        <div className="max-w-56 space-y-1">
+                          <div className="font-medium text-gray-900 dark:text-white">
+                            {Math.round(
+                              report.moderationEvidence.confidence * 100,
+                            )}
+                            %
+                          </div>
+                          <div className="truncate">
+                            {report.moderationEvidence.reasonCodes?.join(
+                              ", ",
+                            ) || "No reason codes"}
+                          </div>
+                          <div className="truncate text-xs">
+                            {report.moderationEvidence.model}
+                            {report.moderationEvidence.modelVersion
+                              ? ` ${report.moderationEvidence.modelVersion}`
+                              : ""}
+                          </div>
+                        </div>
+                      ) : (
+                        <span>No evidence</span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                      {new Date(report.createdAt).toLocaleDateString()}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium sticky right-0 bg-white dark:bg-gray-800 after:absolute after:inset-y-0 after:left-0 after:w-px after:bg-gray-200 dark:after:bg-gray-700">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setSelectedReport(report.id)}
+                        aria-label={`View report ${report.id}`}
+                        className="min-h-[44px] min-w-[44px] rounded-md px-3 text-indigo-600 hover:text-indigo-900 dark:text-indigo-400 dark:hover:text-indigo-300"
+                      >
+                        View
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
       )}
 
       {/* Pagination */}

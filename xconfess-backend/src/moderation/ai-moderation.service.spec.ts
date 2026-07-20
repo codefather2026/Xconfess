@@ -1,6 +1,7 @@
 import { ConfigService } from '@nestjs/config';
 import {
   AiModerationService,
+  buildSafeModerationExcerpt,
   ModerationStatus,
 } from './ai-moderation.service';
 
@@ -41,5 +42,22 @@ describe('AiModerationService', () => {
 
     expect(result.status).toBe(ModerationStatus.APPROVED);
     expect(result.requiresReview).toBe(false);
+    expect(result).toMatchObject({
+      confidence: 0,
+      model: 'rule-based',
+      modelVersion: '2026-07-20',
+      reasonCodes: [],
+    });
+  });
+
+  it('creates redacted safe excerpts for moderation evidence', () => {
+    const excerpt = buildSafeModerationExcerpt(
+      'Email me at user@example.com or call +1 415 555 1234: kill kill',
+    );
+
+    expect(excerpt).toContain('[email]');
+    expect(excerpt).toContain('[phone]');
+    expect(excerpt).not.toContain('user@example.com');
+    expect(excerpt).not.toContain('415 555 1234');
   });
 });

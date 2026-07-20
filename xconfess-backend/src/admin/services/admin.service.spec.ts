@@ -69,6 +69,10 @@ describe('AdminService', () => {
     find: jest.fn(),
   };
 
+  const moderationLogRepository: any = {
+    createQueryBuilder: jest.fn(),
+  };
+
   const moderationTemplateService: any = {
     findById: jest.fn().mockResolvedValue(null),
   };
@@ -97,6 +101,11 @@ describe('AdminService', () => {
 
   beforeEach(() => {
     jest.resetAllMocks();
+    moderationLogRepository.createQueryBuilder.mockReturnValue(
+      createChainableQB({
+        getMany: jest.fn().mockResolvedValue([]),
+      }),
+    );
     reportRepository.manager.transaction.mockImplementation(async (work: any) =>
       work({
         getRepository: (entity: any) => {
@@ -119,6 +128,7 @@ describe('AdminService', () => {
       userRepository,
       userAnonRepository,
       tipRepository,
+      moderationLogRepository,
       moderationService as ModerationService,
       moderationTemplateService,
       configService,
@@ -396,7 +406,12 @@ describe('AdminService', () => {
     userRepository.findOne.mockResolvedValue(user);
     userRepository.save.mockImplementation(async (u: any) => u);
 
-    const updated = await service.updateUserRole(10, 'moderator' as any, 1, {} as any);
+    const updated = await service.updateUserRole(
+      10,
+      'moderator' as any,
+      1,
+      {} as any,
+    );
 
     expect(updated.role).toBe('moderator');
     expect(moderationService.logAction).toHaveBeenCalledWith(

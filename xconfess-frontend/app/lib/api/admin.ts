@@ -1,10 +1,10 @@
-import apiClient from './client';
+import apiClient from "./client";
 import type {
   FailedJobsResponse,
   FailedJobsFilter,
   ReplayJobResponse,
   BulkReplayResponse,
-} from '../types/notification-jobs';
+} from "../types/notification-jobs";
 
 export interface Report {
   id: string;
@@ -19,9 +19,33 @@ export interface Report {
     id: number;
     username: string;
   };
-  type: 'spam' | 'harassment' | 'hate_speech' | 'inappropriate_content' | 'copyright' | 'other';
+  type:
+    | "spam"
+    | "harassment"
+    | "hate_speech"
+    | "inappropriate_content"
+    | "copyright"
+    | "other";
   reason: string | null;
-  status: 'pending' | 'reviewing' | 'resolved' | 'dismissed';
+  status:
+    | "open"
+    | "pending"
+    | "reviewing"
+    | "resolved"
+    | "rejected"
+    | "dismissed"
+    | "escalated";
+  moderationEvidence?: {
+    score: number;
+    confidence: number;
+    categories: string[];
+    reasonCodes: string[];
+    model: string | null;
+    modelVersion: string | null;
+    safeExcerpt: string | null;
+    status: string;
+    createdAt?: string;
+  } | null;
   resolvedBy: number | null;
   resolver?: {
     id: number;
@@ -51,7 +75,7 @@ export interface AuditLog {
   createdAt: string;
 }
 
-export type AdminUserRole = 'user' | 'moderator' | 'admin';
+export type AdminUserRole = "user" | "moderator" | "admin";
 
 export interface User {
   id: number;
@@ -134,14 +158,14 @@ export interface ReportStats {
 }
 
 export interface SystemHealthResponse {
-  status: 'ok' | 'error';
+  status: "ok" | "error";
   details?: Record<string, { status: string; [key: string]: any }>;
   error?: string;
 }
 
 export const adminApi = {
   getSystemHealth: async (): Promise<SystemHealthResponse> => {
-    const response = await apiClient.get('/api/health/ready');
+    const response = await apiClient.get("/api/health/ready");
     return response.data;
   },
 
@@ -154,7 +178,7 @@ export const adminApi = {
     limit?: number;
     offset?: number;
   }) => {
-    const response = await apiClient.get('/api/admin/reports', { params });
+    const response = await apiClient.get("/api/admin/reports", { params });
     return response.data;
   },
 
@@ -178,7 +202,7 @@ export const adminApi = {
   },
 
   bulkResolveReports: async (reportIds: string[], notes?: string) => {
-    const response = await apiClient.patch('/api/admin/reports/bulk-resolve', {
+    const response = await apiClient.patch("/api/admin/reports/bulk-resolve", {
       reportIds,
       notes,
     });
@@ -187,7 +211,7 @@ export const adminApi = {
 
   // Report stats
   getReportStats: async () => {
-    const response = await apiClient.get('/api/admin/reports/stats');
+    const response = await apiClient.get("/api/admin/reports/stats");
     return response.data as ReportStats;
   },
 
@@ -200,14 +224,19 @@ export const adminApi = {
   },
 
   hideConfession: async (id: string, reason?: string) => {
-    const response = await apiClient.patch(`/api/admin/confessions/${id}/hide`, {
-      reason,
-    });
+    const response = await apiClient.patch(
+      `/api/admin/confessions/${id}/hide`,
+      {
+        reason,
+      },
+    );
     return response.data;
   },
 
   unhideConfession: async (id: string) => {
-    const response = await apiClient.patch(`/api/admin/confessions/${id}/unhide`);
+    const response = await apiClient.patch(
+      `/api/admin/confessions/${id}/unhide`,
+    );
     return response.data;
   },
 
@@ -216,10 +245,10 @@ export const adminApi = {
     query: string,
     limit = 50,
     offset = 0,
-    sortBy: 'createdAt' | 'username' | 'role' | 'status' = 'createdAt',
-    sortOrder: 'ASC' | 'DESC' = 'DESC',
+    sortBy: "createdAt" | "username" | "role" | "status" = "createdAt",
+    sortOrder: "ASC" | "DESC" = "DESC",
   ) => {
-    const response = await apiClient.get('/api/admin/users/search', {
+    const response = await apiClient.get("/api/admin/users/search", {
       params: { q: query || undefined, limit, offset, sortBy, sortOrder },
     });
     return response.data;
@@ -237,7 +266,11 @@ export const adminApi = {
     return response.data;
   },
 
-  banUser: async (id: string, reason?: string, durationDays?: number | null) => {
+  banUser: async (
+    id: string,
+    reason?: string,
+    durationDays?: number | null,
+  ) => {
     const response = await apiClient.patch(`/api/admin/users/${id}/ban`, {
       reason,
       durationDays,
@@ -252,14 +285,14 @@ export const adminApi = {
 
   // Analytics
   getAnalytics: async (startDate?: string, endDate?: string) => {
-    const response = await apiClient.get('/api/admin/analytics', {
+    const response = await apiClient.get("/api/admin/analytics", {
       params: { startDate, endDate },
     });
     return response.data;
   },
 
   getObservability: async (startDate?: string, endDate?: string) => {
-    const response = await apiClient.get('/api/admin/observability', {
+    const response = await apiClient.get("/api/admin/observability", {
       params: { startDate, endDate },
     });
     return response.data as AdminObservabilityResponse;
@@ -274,14 +307,14 @@ export const adminApi = {
     requestId?: string;
     actor?: string;
     search?: string;
-    sortBy?: 'createdAt' | 'actor' | 'action' | 'target';
-    sortOrder?: 'ASC' | 'DESC';
+    sortBy?: "createdAt" | "actor" | "action" | "target";
+    sortOrder?: "ASC" | "DESC";
     startDate?: string;
     endDate?: string;
     limit?: number;
     offset?: number;
   }) => {
-    const response = await apiClient.get('/api/admin/audit-logs', {
+    const response = await apiClient.get("/api/admin/audit-logs", {
       params: {
         ...params,
         startDate: params?.startDate || undefined,
@@ -292,7 +325,9 @@ export const adminApi = {
   },
 
   // Failed Notification Jobs
-  getFailedNotificationJobs: async (filter?: FailedJobsFilter): Promise<FailedJobsResponse> => {
+  getFailedNotificationJobs: async (
+    filter?: FailedJobsFilter,
+  ): Promise<FailedJobsResponse> => {
     const params: Record<string, any> = {
       page: filter?.page ?? 1,
       limit: filter?.limit ?? 20,
@@ -305,11 +340,14 @@ export const adminApi = {
       params.failedBefore = new Date(filter.endDate).toISOString();
     }
 
-    const response = await apiClient.get('/api/admin/dlq', { params });
+    const response = await apiClient.get("/api/admin/dlq", { params });
     return response.data;
   },
 
-  replayFailedNotificationJob: async (jobId: string, reason?: string): Promise<ReplayJobResponse> => {
+  replayFailedNotificationJob: async (
+    jobId: string,
+    reason?: string,
+  ): Promise<ReplayJobResponse> => {
     const response = await apiClient.post(`/api/admin/dlq/${jobId}/retry`, {
       reason,
     });
@@ -317,7 +355,7 @@ export const adminApi = {
   },
 
   bulkReplayJobs: async (jobIds: string[]): Promise<BulkReplayResponse> => {
-    const response = await apiClient.post('/api/admin/dlq/replay', { jobIds });
+    const response = await apiClient.post("/api/admin/dlq/replay", { jobIds });
     return response.data;
   },
 
@@ -330,15 +368,17 @@ export const adminApi = {
       params.failedBefore = new Date(filter.endDate).toISOString();
     }
 
-    const response = await apiClient.get('/api/admin/dlq/export-csv', {
+    const response = await apiClient.get("/api/admin/dlq/export-csv", {
       params,
-      responseType: 'blob',
+      responseType: "blob",
     });
 
-    const url = window.URL.createObjectURL(new Blob([response.data], { type: 'text/csv;charset=utf-8;' }));
-    const link = document.createElement('a');
+    const url = window.URL.createObjectURL(
+      new Blob([response.data], { type: "text/csv;charset=utf-8;" }),
+    );
+    const link = document.createElement("a");
     link.href = url;
-    link.setAttribute('download', `dlq-jobs-${Date.now()}.csv`);
+    link.setAttribute("download", `dlq-jobs-${Date.now()}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);

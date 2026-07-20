@@ -21,9 +21,14 @@ export enum ModerationStatus {
 
 export interface ModerationResult {
   score: number;
+  confidence?: number;
   flags: ModerationCategory[];
   status: ModerationStatus;
   details: Record<string, number>;
+  reasonCodes?: string[];
+  model?: string;
+  modelVersion?: string;
+  safeExcerpt?: string;
   requiresReview: boolean;
 }
 
@@ -167,9 +172,14 @@ export class AiModerationService {
 
       return {
         score: maxScore,
+        confidence: maxScore,
         flags,
         status: ModerationStatus.PENDING,
         details,
+        reasonCodes: this.buildReasonCodes(details),
+        model: 'openai-moderation',
+        modelVersion: response.data.model ?? 'unknown',
+        safeExcerpt: buildSafeModerationExcerpt(content),
         requiresReview: false,
       };
     } catch (error) {
@@ -244,9 +254,14 @@ export class AiModerationService {
 
       return {
         score: maxScore,
+        confidence: maxScore,
         flags,
         status: ModerationStatus.PENDING,
         details,
+        reasonCodes: this.buildReasonCodes(details),
+        model: 'perspective-api',
+        modelVersion: 'v1alpha1',
+        safeExcerpt: buildSafeModerationExcerpt(content),
         requiresReview: false,
       };
     } catch (error) {
@@ -321,11 +336,23 @@ export class AiModerationService {
 
     return {
       score: Math.min(score, 1),
+      confidence: Math.min(score, 1),
       flags,
       status: ModerationStatus.PENDING,
       details,
+      reasonCodes: this.buildReasonCodes(details),
+      model: 'rule-based',
+      modelVersion: '2026-07-20',
+      safeExcerpt: buildSafeModerationExcerpt(content),
       requiresReview: false,
     };
+  }
+
+  private buildReasonCodes(details: Record<string, number>): string[] {
+    return Object.entries(details)
+      .filter(([, score]) => score > 0)
+      .sort(([, left], [, right]) => right - left)
+      .map(([category, score]) => `${category}:${score.toFixed(4)}`);
   }
 
   private countPatterns(content: string, patterns: string[]): number {
@@ -353,8 +380,12 @@ export class AiModerationService {
       userId,
       contentLength: content.length,
       score: result.score,
+      confidence: result.confidence,
       status: result.status,
       flags: result.flags,
+      reasonCodes: result.reasonCodes,
+      model: result.model,
+      modelVersion: result.modelVersion,
       requiresReview: result.requiresReview,
       timestamp: new Date().toISOString(),
     });
@@ -374,4 +405,24 @@ export class AiModerationService {
       autoActionEnabled: this.autoActionEnabled,
     };
   }
+}
+
+export function buildSafeModerationExcerpt(
+  content: string,
+  maxLength = 240,
+): string {
+  const redacted = content
+    .replace(/https?:\/\/\S+/gi, '[url]')
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '[email]')
+    .replace(/@\w{2,}/g, '[handle]')
+    .replace(/\+?\d[\d\s().-]{7,}\d/g, '[phone]')
+    .replace(/\b\d{5,}\b/g, '[number]')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (redacted.length <= maxLength) {
+    return redacted;
+  }
+
+  return `${redacted.slice(0, maxLength - 3).trimEnd()}...`;
 }
