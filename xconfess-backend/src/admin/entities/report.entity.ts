@@ -27,8 +27,6 @@ export enum ReportStatus {
   ESCALATED = 'escalated',
   RESOLVED = 'resolved',
   REJECTED = 'rejected',
-  PENDING = 'open',
-  DISMISSED = 'rejected',
 }
 
 @Entity('reports')

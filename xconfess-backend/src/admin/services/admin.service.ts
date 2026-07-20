@@ -221,11 +221,11 @@ export class AdminService {
         throw new NotFoundException('Report not found');
       }
 
-      if (report.status === ReportStatus.DISMISSED) {
+      if (report.status === ReportStatus.REJECTED) {
         throw new BadRequestException('Report already dismissed');
       }
 
-      report.status = ReportStatus.DISMISSED;
+      report.status = ReportStatus.REJECTED;
       report.resolvedBy = adminId;
       report.resolvedAt = new Date();
       report.resolutionNotes = notes;
@@ -279,7 +279,7 @@ export class AdminService {
           continue;
         }
 
-        if (report.status !== ReportStatus.PENDING) {
+        if (report.status !== ReportStatus.OPEN) {
           outcomes.push({
             id,
             outcome: 'skipped',
@@ -924,11 +924,11 @@ export class AdminService {
     resolvedTodayCount: number;
   }> {
     const pendingCount = await this.reportRepository.count({
-      where: { status: ReportStatus.PENDING },
+      where: { status: ReportStatus.OPEN },
     });
 
     const oldestPending = await this.reportRepository.findOne({
-      where: { status: ReportStatus.PENDING },
+      where: { status: ReportStatus.OPEN },
       order: { createdAt: 'ASC' },
     });
 

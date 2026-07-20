@@ -2,10 +2,10 @@ import { IsEnum, IsOptional, IsString, MaxLength } from 'class-validator';
 import { ReportStatus } from '../../admin/entities/report.entity';
 
 export class UpdateReportStatusDto {
-  @IsEnum([ReportStatus.RESOLVED, ReportStatus.DISMISSED], {
-    message: 'status must be "resolved" or "dismissed"',
+  @IsEnum([ReportStatus.RESOLVED, ReportStatus.REJECTED], {
+    message: 'status must be "resolved" or "rejected"',
   })
-  status: ReportStatus.RESOLVED | ReportStatus.DISMISSED;
+  status: ReportStatus.RESOLVED | ReportStatus.REJECTED;
 
   @IsOptional()
   @IsString()
