@@ -23,6 +23,12 @@ import { JobManagementService } from '../../notifications/services/job-managemen
 import { LockoutService } from '../../auth/lockout.service';
 import { ModerationLog } from '../../moderation/entities/moderation-log.entity';
 import { buildSafeModerationExcerpt } from '../../moderation/ai-moderation.service';
+import {
+  CursorPaginatedResponseDto,
+  PAGINATION,
+  decodeCursor,
+  encodeCursor,
+} from '../../common/pagination';
 
 export interface BulkResolveOutcome {
   id: string;

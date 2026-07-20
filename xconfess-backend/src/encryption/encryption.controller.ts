@@ -1,6 +1,5 @@
 import { Controller, Post, Body } from '@nestjs/common';
-import { EncryptionService } from './encryption.service';
-import { CreateEncryptionDto } from './dto/create-encryption.dto';
+import { EncryptionService, EnvelopePayload } from './encryption.service';
 
 @Controller('encryption')
 export class EncryptionController {
@@ -12,7 +11,7 @@ export class EncryptionController {
   }
 
   @Post('decrypt')
-  decrypt(@Body() dto: { encrypted: string }) {
+  decrypt(@Body() dto: { encrypted: EnvelopePayload }) {
     return { decrypted: this.encryptionService.decrypt(dto.encrypted) };
   }
 }

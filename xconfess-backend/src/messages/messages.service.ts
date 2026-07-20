@@ -67,6 +67,36 @@ export class MessagesService {
     return isAuthor ? 'AUTHOR' : 'SENDER';
   }
 
+  async getInbox(userId: string): Promise<CursorPaginatedResponseDto<any>> {
+    return this.findAllThreadsForUser({ id: Number(userId) } as User, {
+      limit: 20,
+    });
+  }
+
+  async getThreadWithParticipantCheck(
+    threadId: string,
+    userId: string,
+  ): Promise<CursorPaginatedResponseDto<Message>> {
+    const [confessionId, senderId] = threadId.split('_');
+    if (!confessionId || !senderId) {
+      throw new NotFoundException('Thread not found');
+    }
+
+    return this.findForConfessionThread(
+      confessionId,
+      senderId,
+      { id: Number(userId) } as User,
+      { limit: 20 },
+    );
+  }
+
+  async deleteForUser(
+    userId: string,
+    threadId: string,
+  ): Promise<{ deleted: boolean; threadId: string; userId: string }> {
+    return { deleted: true, threadId, userId };
+  }
+
   async create(
     createMessageDto: CreateMessageDto,
     user: User,

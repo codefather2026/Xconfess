@@ -16,6 +16,12 @@ import { Gender } from '../dto/get-confessions.dto';
 import { Comment } from '../../comment/entities/comment.entity';
 import { ConfessionTag } from './confession-tag.entity';
 
+export enum MigrationStatus {
+  PENDING = 'pending',
+  PROCESSING = 'processing',
+  COMPLETED = 'completed',
+}
+
 @Entity('anonymous_confessions')
 @Unique(['stellarTxHash'])
 export class AnonymousConfession {
@@ -73,6 +79,16 @@ export class AnonymousConfession {
   })
   @Index()
   migrationStatus: MigrationStatus;
+
+  @Column({ name: 'encrypted_content', type: 'text', nullable: true })
+  encryptedContent: string | null;
+
+  @Column({ name: 'wrapped_dek', type: 'text', nullable: true })
+  wrappedDek: string | null;
+
+  @Column({ name: 'key_version', type: 'varchar', length: 16, nullable: true })
+  keyVersion: string | null;
+
   @Column({ name: 'deleted_at', type: 'timestamp', nullable: true })
   deletedAt: Date | null;
 
