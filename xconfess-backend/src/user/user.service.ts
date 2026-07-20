@@ -140,6 +140,33 @@ export class UserService {
     return this.userRepository.save(user);
   }
 
+  async getPublicProfile(userId: string): Promise<{
+    id: number;
+    username: string;
+    createdAt: Date;
+  }> {
+    const user = await this.findById(Number(userId));
+    if (!user) throw new NotFoundException('User not found');
+
+    return {
+      id: user.id,
+      username: user.username,
+      createdAt: user.createdAt,
+    };
+  }
+
+  async updateSettings(
+    userId: string,
+    dto: Record<string, unknown>,
+  ): Promise<PrivacySettingsResponseDto> {
+    return this.updatePrivacySettings(Number(userId), dto);
+  }
+
+  async deleteAccount(userId: string): Promise<{ deleted: true }> {
+    await this.deactivateAccount(Number(userId));
+    return { deleted: true };
+  }
+
   // =========================
   // Password reset helpers
   // =========================

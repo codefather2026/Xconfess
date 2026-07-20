@@ -1,8 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Not } from 'typeorm';
-import { EncryptionService } from './encryption.service';
-import { Confession } from '../confessions/confession.entity';
+import { EncryptionService } from '../encryption/encryption.service';
+import {
+  AnonymousConfession,
+  MigrationStatus,
+} from '../confession/entities/confession.entity';
 
 export interface RotationResult {
   total: number;
@@ -17,8 +20,8 @@ export class KeyRotationService {
   private readonly logger = new Logger(KeyRotationService.name);
 
   constructor(
-    @InjectRepository(Confession)
-    private readonly confessionRepo: Repository<Confession>,
+    @InjectRepository(AnonymousConfession)
+    private readonly confessionRepo: Repository<AnonymousConfession>,
     private readonly encryptionService: EncryptionService,
   ) {}
 
@@ -47,7 +50,7 @@ export class KeyRotationService {
       const batch = await this.confessionRepo.find({
         where: {
           wrappedDek: Not(''), // has envelope encryption
-          migrationStatus: 'completed', // only fully migrated rows
+          migrationStatus: MigrationStatus.COMPLETED, // only fully migrated rows
         },
         select: ['id', 'encryptedContent', 'wrappedDek', 'keyVersion'],
         take: batchSize,
@@ -64,6 +67,19 @@ export class KeyRotationService {
 
       for (const confession of batch) {
         try {
+          if (
+            !confession.encryptedContent ||
+            !confession.wrappedDek ||
+            !confession.keyVersion
+          ) {
+            result.failed++;
+            result.errors.push({
+              confessionId: confession.id,
+              error: 'Missing encryption envelope fields',
+            });
+            continue;
+          }
+
           if (this.encryptionService.isCurrentVersion(confession.keyVersion)) {
             result.alreadyCurrent++;
             continue;

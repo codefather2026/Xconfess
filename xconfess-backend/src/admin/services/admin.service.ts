@@ -6,7 +6,7 @@
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, In, Repository, LessThan } from 'typeorm';
-import { Report, ReportStatus, ReportType } from '../entities/report.entity'
+import { Report, ReportStatus, ReportType } from '../entities/report.entity';
 import { AnonymousConfession } from '../../confession/entities/confession.entity';
 import { User, UserRole } from '../../user/entities/user.entity';
 import { ModerationService } from './moderation.service';
@@ -21,6 +21,12 @@ import { Tip } from '../../tipping/entities/tip.entity';
 import { AuditLogService } from '../../audit-log/audit-log.service';
 import { JobManagementService } from '../../notifications/services/job-management.service';
 import { LockoutService } from '../../auth/lockout.service';
+import {
+  CursorPaginatedResponseDto,
+  PAGINATION,
+  decodeCursor,
+  encodeCursor,
+} from '../../common/pagination';
 
 export interface BulkResolveOutcome {
   id: string;
@@ -829,7 +835,9 @@ export class AdminService {
     limit = 20,
     cursor?: string,
   ): Promise<CursorPaginatedResponseDto<Report>> {
-    const parsedCursor = decodeCursor<{ id: string; createdAt: string }>(cursor);
+    const parsedCursor = decodeCursor<{ id: string; createdAt: string }>(
+      cursor,
+    );
     const take = Math.min(limit + 1, PAGINATION.MAX_LIMIT);
 
     const query = this.reportRepository
@@ -870,14 +878,20 @@ export class AdminService {
 
     const mapped = reports.map((r) => {
       if (r.confession?.message) {
-        r.confession.message = this.safeDecryptConfessionMessage(r.confession.message);
+        r.confession.message = this.safeDecryptConfessionMessage(
+          r.confession.message,
+        );
       }
       return r;
     });
 
-    const nextCursor = hasMore && reports.length > 0
-      ? encodeCursor({ id: reports[reports.length - 1].id, createdAt: reports[reports.length - 1].createdAt.toISOString() })
-      : null;
+    const nextCursor =
+      hasMore && reports.length > 0
+        ? encodeCursor({
+            id: reports[reports.length - 1].id,
+            createdAt: reports[reports.length - 1].createdAt.toISOString(),
+          })
+        : null;
 
     return new CursorPaginatedResponseDto(mapped, nextCursor, hasMore, limit);
   }
@@ -887,7 +901,9 @@ export class AdminService {
     limit = 20,
     cursor?: string,
   ): Promise<CursorPaginatedResponseDto<User>> {
-    const parsedCursor = decodeCursor<{ id: number; createdAt: string }>(cursor);
+    const parsedCursor = decodeCursor<{ id: number; createdAt: string }>(
+      cursor,
+    );
     const take = Math.min(limit + 1, PAGINATION.MAX_LIMIT);
 
     const qb = this.userRepository
@@ -911,9 +927,13 @@ export class AdminService {
     const hasMore = users.length > limit;
     if (hasMore) users.pop();
 
-    const nextCursor = hasMore && users.length > 0
-      ? encodeCursor({ id: users[users.length - 1].id, createdAt: users[users.length - 1].createdAt.toISOString() })
-      : null;
+    const nextCursor =
+      hasMore && users.length > 0
+        ? encodeCursor({
+            id: users[users.length - 1].id,
+            createdAt: users[users.length - 1].createdAt.toISOString(),
+          })
+        : null;
 
     return new CursorPaginatedResponseDto(users, nextCursor, hasMore, limit);
   }
