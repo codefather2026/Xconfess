@@ -87,9 +87,6 @@ const nextConfig = {
   experimental: {
     optimizePackageImports: ["lucide-react", "@stellar/stellar-sdk"],
     useLightningcss: false,
-    turbopack: {
-      root: __dirname,
-    },
   },
 
   compiler: {
