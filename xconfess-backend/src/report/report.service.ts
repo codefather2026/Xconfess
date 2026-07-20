@@ -15,7 +15,7 @@ export interface LegacyCreateReportDto {
 }
 
 export interface LegacyUpdateReportDto {
-  status: ReportStatus.RESOLVED | ReportStatus.DISMISSED;
+  status: ReportStatus.RESOLVED | ReportStatus.REJECTED;
   note?: string;
   resolutionReason?: string;
 }
@@ -77,6 +77,6 @@ export class ReportService {
   }
 
   async dismiss(id: string, note?: string): Promise<Report> {
-    return this.updateStatus(id, { status: ReportStatus.DISMISSED, note });
+    return this.updateStatus(id, { status: ReportStatus.REJECTED, note });
   }
 }

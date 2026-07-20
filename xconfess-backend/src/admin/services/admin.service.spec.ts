@@ -176,7 +176,7 @@ describe('AdminService', () => {
   it('resolveReport updates status and logs audit action', async () => {
     const report: any = {
       id: 'r1',
-      status: ReportStatus.PENDING,
+      status: ReportStatus.OPEN,
       type: 'spam',
       confessionId: 'c1',
       confession: { message: 'not-encrypted' },
@@ -212,7 +212,7 @@ describe('AdminService', () => {
     const committedState = {
       report: {
         id: 'r1',
-        status: ReportStatus.PENDING,
+        status: ReportStatus.OPEN,
         type: 'spam',
         confessionId: 'c1',
         resolvedBy: null,
@@ -257,7 +257,7 @@ describe('AdminService', () => {
       service.resolveReport('r1', 1, 'note', null, {} as any),
     ).rejects.toThrow('Injected audit failure');
 
-    expect(committedState.report.status).toBe(ReportStatus.PENDING);
+    expect(committedState.report.status).toBe(ReportStatus.OPEN);
     expect(eventEmitter.emit).not.toHaveBeenCalledWith(
       'report.updated',
       expect.anything(),
@@ -267,7 +267,7 @@ describe('AdminService', () => {
   it('dismissReport updates status and logs audit action', async () => {
     const report: any = {
       id: 'r1',
-      status: ReportStatus.PENDING,
+      status: ReportStatus.OPEN,
       type: 'spam',
       confessionId: 'c1',
     };
@@ -275,7 +275,7 @@ describe('AdminService', () => {
     reportRepository.save.mockImplementation(async (r: any) => r);
 
     const res = await service.dismissReport('r1', 2, 'no violation', {} as any);
-    expect(res.status).toBe(ReportStatus.DISMISSED);
+    expect(res.status).toBe(ReportStatus.REJECTED);
     expect(moderationService.logAction).toHaveBeenCalledWith(
       2,
       AuditActionType.REPORT_DISMISSED,
@@ -298,7 +298,7 @@ describe('AdminService', () => {
 
   it('bulkResolveReports resolves pending reports and logs per-report audit', async () => {
     reportRepository.find.mockResolvedValue([
-      { id: 'a', status: ReportStatus.PENDING },
+      { id: 'a', status: ReportStatus.OPEN },
     ]);
     reportRepository.save.mockResolvedValue(undefined);
     const result = await service.bulkResolveReports(
@@ -347,8 +347,8 @@ describe('AdminService', () => {
 
   it('bulkResolveReports handles mixed success/skip/not_found in one call', async () => {
     reportRepository.find.mockResolvedValue([
-      { id: 'ok', status: ReportStatus.PENDING },
-      { id: 'skip', status: ReportStatus.DISMISSED },
+      { id: 'ok', status: ReportStatus.OPEN },
+      { id: 'skip', status: ReportStatus.REJECTED },
     ]);
     reportRepository.save.mockResolvedValue(undefined);
     const result = await service.bulkResolveReports(
